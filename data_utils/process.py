@@ -5,48 +5,54 @@ import numpy as np
 from tqdm import tqdm
 def extract_audio(path, out_path, sample_rate=16000):
     
-    print(f'[INFO] ===== extract audio from {path} to {out_path} =====')
-    cmd = f'ffmpeg -i {path} -f wav -ar {sample_rate} {out_path}'
+    print(f'[INFO] ===== extract audio from "{path}" to "{out_path}" =====')
+    cmd = f'ffmpeg -i "{path}" -f wav -ar {sample_rate} "{out_path}" -y'
     os.system(cmd)
     print(f'[INFO] ===== extracted audio =====')
     
 def extract_images(path):
     
     
-    full_body_dir = path.replace(path.split("/")[-1], "full_body_img")
+    video_name = os.path.basename(path)
+    base_dir = os.path.dirname(path)
+    full_body_dir = os.path.join(base_dir, "full_body_img")
     if not os.path.exists(full_body_dir):
-        os.mkdir(full_body_dir)
+        os.makedirs(full_body_dir, exist_ok=True)
     
     counter = 0
     cap = cv2.VideoCapture(path)
     fps = cap.get(cv2.CAP_PROP_FPS)
-    if fps != 25:
+    if abs(fps - 25) > 0.1: # More robust than != 25
         # High quality conversion to 25fps using ffmpeg
-        cmd = f'ffmpeg -i {path} -vf "fps=25" -c:v libx264 -c:a aac {path.replace(".mp4", "_25fps.mp4")}'
+        out_25 = path.replace(".mp4", "_25fps.mp4")
+        cmd = f'ffmpeg -i "{path}" -vf "fps=25" -c:v libx264 -c:a aac "{out_25}" -y'
         os.system(cmd)
-        path = path.replace(".mp4", "_25fps.mp4")
+        path = out_25
     
     cap = cv2.VideoCapture(path)
     fps = cap.get(cv2.CAP_PROP_FPS)
-    if fps != 25:
-        raise ValueError("Your video fps should be 25!!!")
+    if abs(fps - 25) > 0.6: # Allow minor precision differences
+        raise ValueError(f"Your video fps should be 25, but it is {fps}!!!")
         
     print("extracting images...")
     while True:
         ret, frame = cap.read()
         if not ret:
             break
-        cv2.imwrite(full_body_dir+"/"+str(counter)+'.jpg', frame)
+        cv2.imwrite(os.path.join(full_body_dir, str(counter) + '.jpg'), frame)
         counter += 1
         
 def get_audio_feature(wav_path):
     
     print("extracting audio feature...")
-    os.system("python ./data_utils/ave/test_w2l_audio.py --wav_path "+wav_path)
+    import sys
+    cmd = f'"{sys.executable}" ./data_utils/ave/test_w2l_audio.py --wav_path "{wav_path}"'
+    os.system(cmd)
     
 def get_landmark(path, landmarks_dir):
     print("detecting landmarks...")
-    full_img_dir = path.replace(path.split("/")[-1], "full_body_img")
+    base_dir = os.path.dirname(path)
+    full_img_dir = os.path.join(base_dir, "full_body_img")
     
     from get_landmark import Landmark
     landmark = Landmark()

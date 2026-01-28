@@ -17,19 +17,21 @@ class Dataset(object):
         self.img_path_list = []
         self.lms_path_list = []
         
-        for i in range(len(os.listdir(dataset_dir+"/full_body_img/"))):
-
-            img_path = os.path.join(dataset_dir+"/full_body_img/", str(i)+".jpg")
-            lms_path = os.path.join(dataset_dir+"/landmarks/", str(i)+".lms")
+        full_body_img_dir = os.path.join(dataset_dir, "full_body_img")
+        landmarks_dir = os.path.join(dataset_dir, "landmarks")
+        
+        for i in range(len(os.listdir(full_body_img_dir))):
+            img_path = os.path.join(full_body_img_dir, str(i) + ".jpg")
+            lms_path = os.path.join(landmarks_dir, str(i) + ".lms")
             self.img_path_list.append(img_path)
             self.lms_path_list.append(lms_path)
                 
         if mode=="wenet":
-            audio_feats_path = dataset_dir+"/aud_wenet.npy"
+            audio_feats_path = os.path.join(dataset_dir, "aud_wenet.npy")
         if mode=="hubert":
-            audio_feats_path = dataset_dir+"/aud_hu.npy"
+            audio_feats_path = os.path.join(dataset_dir, "aud_hu.npy")
         if mode=="ave":
-            audio_feats_path = dataset_dir+"/aud_ave.npy"
+            audio_feats_path = os.path.join(dataset_dir, "aud_ave.npy")
         self.mode = mode
         self.audio_feats = np.load(audio_feats_path)
         self.audio_feats = self.audio_feats.astype(np.float32)
@@ -229,12 +231,12 @@ def cosine_loss(a, v, y):
     
 def train(save_dir, dataset_dir, mode):
     if not os.path.exists(save_dir):
-        os.mkdir(save_dir)
+        os.makedirs(save_dir, exist_ok=True)
         
     train_dataset = Dataset(dataset_dir, mode=mode)
     train_data_loader = DataLoader(
         train_dataset, batch_size=16, shuffle=True,
-        num_workers=16)
+        num_workers=0)
     model = SyncNet_color(mode).cuda()
     optimizer = optim.Adam([p for p in model.parameters() if p.requires_grad],
                            lr=0.001)
