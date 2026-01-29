@@ -41,13 +41,31 @@ def extract_images(path):
             break
         cv2.imwrite(os.path.join(full_body_dir, str(counter) + '.jpg'), frame)
         counter += 1
-        
+
+
 def get_audio_feature(wav_path):
-    
     print("extracting audio feature...")
     import sys
-    cmd = f'"{sys.executable}" ./data_utils/ave/test_w2l_audio.py --wav_path "{wav_path}"'
-    os.system(cmd)
+    import subprocess
+
+    # 转换为绝对路径，彻底消除“找不到路径”的问题
+    script_path = os.path.abspath("./data_utils/ave/test_w2l_audio.py")
+    wav_path = os.path.abspath(wav_path)
+
+    if not os.path.exists(script_path):
+        print(f"[ERROR] Script not found: {script_path}")
+        return
+
+    # 使用 subprocess.run 替代 os.system，它能更好地处理 Windows 的空格和引号
+    try:
+        subprocess.run(
+            [sys.executable, script_path, "--wav_path", wav_path],
+            check=True
+        )
+    except subprocess.CalledProcessError as e:
+        print(f"[ERROR] get_audio_feature failed with return code {e.returncode}")
+    except Exception as e:
+        print(f"[ERROR] An unexpected error occurred: {e}")
     
 def get_landmark(path, landmarks_dir):
     print("detecting landmarks...")
