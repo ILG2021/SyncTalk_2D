@@ -21,8 +21,8 @@ def get_args():
     parser.add_argument('--dataset_dir', type=str)
     parser.add_argument('--save_dir', type=str, help="trained model save path.")
     parser.add_argument('--see_res', action='store_false', default=True, help="Set to disable result visualization during training.")
-    parser.add_argument('--epochs', type=int, default=50)
-    parser.add_argument('--batchsize', type=int, default=8)
+    parser.add_argument('--epochs', type=int, default=100)
+    parser.add_argument('--batchsize', type=int, default=64)
     parser.add_argument('--lr', type=float, default=0.001)
     parser.add_argument('--asr', type=str, default="hubert")
 
@@ -79,14 +79,26 @@ def train(net, epoch, batch_size, lr):
     dataset_dir_list = [args.dataset_dir]
     for dataset_dir in dataset_dir_list:
         dataset = MyDataset(dataset_dir, args.asr)
-        train_dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True, drop_last=False, num_workers=32)
+        train_dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True, drop_last=True, num_workers=16, pin_memory=True, persistent_workers=True)
         dataloader_list.append(train_dataloader)
         dataset_list.append(dataset)
     
     optimizer = optim.Adam(net.parameters(), lr=lr)
     criterion = nn.L1Loss()
     
-    for e in range(epoch):
+    start_epoch = 0
+    # 自动检测检查点
+    if os.path.exists(save_dir):
+        checkpoints = [f for f in os.listdir(save_dir) if f.endswith('.pth') and f[:-4].isdigit()]
+        if checkpoints:
+            checkpoints.sort(key=lambda x: int(x[:-4]))
+            latest_checkpoint = checkpoints[-1]
+            checkpoint_path = os.path.join(save_dir, latest_checkpoint)
+            start_epoch = int(latest_checkpoint[:-4]) + 1
+            print(f"检测到检查点，从 epoch {start_epoch} 恢复训练: {checkpoint_path}")
+            net.load_state_dict(torch.load(checkpoint_path))
+
+    for e in range(start_epoch, epoch):
         net.train()
         random_i = random.randint(0, len(dataset_dir_list)-1)
         dataset = dataset_list[random_i]

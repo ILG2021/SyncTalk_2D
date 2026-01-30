@@ -235,13 +235,27 @@ def train(save_dir, dataset_dir, mode):
         
     train_dataset = Dataset(dataset_dir, mode=mode)
     train_data_loader = DataLoader(
-        train_dataset, batch_size=16, shuffle=True,
-        num_workers=0)
+        train_dataset, batch_size=128, shuffle=True,
+        num_workers=16, pin_memory=True, persistent_workers=True)
     model = SyncNet_color(mode).cuda()
     optimizer = optim.Adam([p for p in model.parameters() if p.requires_grad],
                            lr=0.001)
+    
+    start_epoch = 0
+    # 自动检测检查点
+    checkpoint_path = None
+    if os.path.exists(save_dir):
+        checkpoints = [f for f in os.listdir(save_dir) if f.endswith('.pth') and f[:-4].isdigit()]
+        if checkpoints:
+            checkpoints.sort(key=lambda x: int(x[:-4]))
+            latest_checkpoint = checkpoints[-1]
+            checkpoint_path = os.path.join(save_dir, latest_checkpoint)
+            start_epoch = int(latest_checkpoint[:-4])
+            print(f"检测到检查点，从 epoch {start_epoch} 恢复训练: {checkpoint_path}")
+            model.load_state_dict(torch.load(checkpoint_path))
+
     best_loss = 1000000
-    for epoch in range(50):
+    for epoch in range(start_epoch, 100):
         for batch in train_data_loader:
             imgT, audioT, y = batch
             imgT = imgT.cuda()
@@ -251,7 +265,7 @@ def train(save_dir, dataset_dir, mode):
             loss = cosine_loss(audio_embedding, face_embedding, y)
             loss.backward()
             optimizer.step()
-        print(epoch+1, loss.item())
+        print(f"Epoch {epoch+1}, Loss: {loss.item()}")
         if loss.item() < best_loss:
             best_loss = loss.item()
             torch.save(model.state_dict(), os.path.join(save_dir, str(epoch+1)+'.pth'))
