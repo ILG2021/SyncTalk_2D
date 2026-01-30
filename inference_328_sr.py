@@ -1,6 +1,6 @@
 """
 Inference script with Super Resolution enhancement.
-Uses 328px model + Real-ESRGAN/GFPGAN/CodeFormer for upscaling the mouth region.
+Uses 328px model to generate video, then applies SR to the entire video.
 """
 import argparse
 import os
@@ -29,123 +29,45 @@ except ImportError:
     HAS_GFPGAN = False
     print("[WARN] GFPGAN not found. Run: pip install gfpgan")
 
-try:
-    from basicsr.utils import imwrite, img2tensor, tensor2img
-    from basicsr.utils.download_util import load_file_from_url
-    from basicsr.utils.registry import ARCH_REGISTRY
-    from torchvision.transforms.functional import normalize
-    from facelib.utils.face_restoration_helper import FaceRestoreHelper
-    HAS_CODEFORMER = True
-except ImportError:
-    HAS_CODEFORMER = False
-    print("[WARN] CodeFormer dependencies not found. Run: pip install basicsr facexlib")
 
-
-class CodeFormerEnhancer:
-    """CodeFormer face restoration wrapper."""
-    def __init__(self, model_path=None, upscale=2, fidelity_weight=0.5, device='cuda'):
-        self.device = device
-        self.upscale = upscale
-        self.fidelity_weight = fidelity_weight
-        
-        if model_path is None:
-            model_path = 'model/codeformer/codeformer.pth'
-        
-        if not os.path.exists(model_path):
-            print(f"[INFO] Downloading CodeFormer model...")
-            os.makedirs(os.path.dirname(model_path), exist_ok=True)
-            url = 'https://github.com/sczhou/CodeFormer/releases/download/v0.1.0/codeformer.pth'
-            load_file_from_url(url, model_dir=os.path.dirname(model_path), progress=True, file_name='codeformer.pth')
-        
-        # Load CodeFormer model
-        self.net = ARCH_REGISTRY.get('CodeFormer')(dim_embd=512, codebook_size=1024, n_head=8, n_layers=9, 
-                                                    connect_list=['32', '64', '128', '256']).to(self.device)
-        ckpt = torch.load(model_path, map_location=self.device)
-        self.net.load_state_dict(ckpt['params_ema'])
-        self.net.eval()
-        
-        # Face helper for face detection and alignment
-        self.face_helper = FaceRestoreHelper(
-            upscale,
-            face_size=512,
-            crop_ratio=(1, 1),
-            det_model='retinaface_resnet50',
-            save_ext='png',
-            use_parse=True,
-            device=self.device
-        )
-    
-    def enhance(self, img, has_aligned=False, only_center_face=False, paste_back=True):
-        self.face_helper.clean_all()
-        
-        if has_aligned:
-            # Input is already cropped and aligned face
-            self.face_helper.cropped_faces = [img]
-        else:
-            self.face_helper.read_image(img)
-            self.face_helper.get_face_landmarks_5(only_center_face=only_center_face, resize=640, eye_dist_threshold=5)
-            self.face_helper.align_warp_face()
-        
-        # Process each face
-        for cropped_face in self.face_helper.cropped_faces:
-            # Prepare input
-            cropped_face_t = img2tensor(cropped_face / 255., bgr2rgb=True, float32=True)
-            normalize(cropped_face_t, (0.5, 0.5, 0.5), (0.5, 0.5, 0.5), inplace=True)
-            cropped_face_t = cropped_face_t.unsqueeze(0).to(self.device)
-            
-            with torch.no_grad():
-                output = self.net(cropped_face_t, w=self.fidelity_weight, adain=True)[0]
-                restored_face = tensor2img(output, rgb2bgr=True, min_max=(-1, 1))
-            
-            restored_face = restored_face.astype('uint8')
-            self.face_helper.add_restored_face(restored_face)
-        
-        if not has_aligned and paste_back:
-            self.face_helper.get_inverse_affine(None)
-            restored_img = self.face_helper.paste_faces_to_input_image()
-            return restored_img
-        else:
-            return self.face_helper.cropped_faces[0] if self.face_helper.cropped_faces else img
-
-
-def setup_realesrgan(model_path=None, scale=2):
-    """Setup Real-ESRGAN model for general super resolution."""
+def setup_realesrgan(scale=2):
+    """Setup Real-ESRGAN model."""
     if not HAS_REALESRGAN:
         return None
     
-    # Use RealESRGAN_x2plus for 2x upscaling (faster)
-    model = RRDBNet(num_in_ch=3, num_out_ch=3, num_feat=64, num_block=23, num_grow_ch=32, scale=scale)
-    
-    if model_path is None:
-        # Default model path
+    if scale == 4:
+        model = RRDBNet(num_in_ch=3, num_out_ch=3, num_feat=64, num_block=23, num_grow_ch=32, scale=4)
+        model_path = 'model/realesrgan/RealESRGAN_x4plus.pth'
+        url = 'https://github.com/xinntao/Real-ESRGAN/releases/download/v0.1.0/RealESRGAN_x4plus.pth'
+    else:
+        model = RRDBNet(num_in_ch=3, num_out_ch=3, num_feat=64, num_block=23, num_grow_ch=32, scale=2)
         model_path = 'model/realesrgan/RealESRGAN_x2plus.pth'
+        url = 'https://github.com/xinntao/Real-ESRGAN/releases/download/v0.2.1/RealESRGAN_x2plus.pth'
     
     if not os.path.exists(model_path):
-        print(f"[INFO] Downloading Real-ESRGAN model...")
+        print(f"[INFO] Downloading Real-ESRGAN x{scale} model...")
         os.makedirs(os.path.dirname(model_path), exist_ok=True)
         import urllib.request
-        url = 'https://github.com/xinntao/Real-ESRGAN/releases/download/v0.2.1/RealESRGAN_x2plus.pth'
         urllib.request.urlretrieve(url, model_path)
     
     upsampler = RealESRGANer(
         scale=scale,
         model_path=model_path,
         model=model,
-        tile=0,
+        tile=400,
         tile_pad=10,
         pre_pad=0,
-        half=True  # Use FP16 for faster inference
+        half=True
     )
     return upsampler
 
 
-def setup_gfpgan(model_path=None):
-    """Setup GFPGAN model for face-specific enhancement."""
+def setup_gfpgan(bg_upsampler=None):
+    """Setup GFPGAN model."""
     if not HAS_GFPGAN:
         return None
     
-    if model_path is None:
-        model_path = 'model/gfpgan/GFPGANv1.4.pth'
+    model_path = 'model/gfpgan/GFPGANv1.4.pth'
     
     if not os.path.exists(model_path):
         print(f"[INFO] Downloading GFPGAN model...")
@@ -159,36 +81,60 @@ def setup_gfpgan(model_path=None):
         upscale=2,
         arch='clean',
         channel_multiplier=2,
-        bg_upsampler=None
+        bg_upsampler=bg_upsampler
     )
     return face_enhancer
 
 
-def setup_codeformer(fidelity_weight=0.5):
-    """Setup CodeFormer model for face restoration."""
-    if not HAS_CODEFORMER:
-        return None
-    
-    return CodeFormerEnhancer(fidelity_weight=fidelity_weight)
-
-
-def enhance_face_region(img, sr_model, sr_type='realesrgan'):
-    """Enhance image using super resolution model."""
+def enhance_frame(frame, sr_model, sr_type, scale):
+    """Enhance a single frame."""
     if sr_model is None:
-        return img
+        return frame
     
     if sr_type == 'gfpgan':
-        # GFPGAN expects BGR image
-        _, _, output = sr_model.enhance(img, has_aligned=False, only_center_face=False, paste_back=True)
-        return output
-    elif sr_type == 'codeformer':
-        # CodeFormer - use aligned face mode for mouth region
-        output = sr_model.enhance(img, has_aligned=True, paste_back=False)
+        _, _, output = sr_model.enhance(frame, has_aligned=False, only_center_face=False, paste_back=True)
+        if output is None:
+            return cv2.resize(frame, (frame.shape[1] * scale, frame.shape[0] * scale), interpolation=cv2.INTER_CUBIC)
         return output
     else:
-        # Real-ESRGAN
-        output, _ = sr_model.enhance(img, outscale=2)
+        output, _ = sr_model.enhance(frame, outscale=scale)
         return output
+
+
+def upscale_video(input_path, output_path, sr_model, sr_type, scale, audio_path):
+    """Apply super resolution to entire video."""
+    cap = cv2.VideoCapture(input_path)
+    fps = cap.get(cv2.CAP_PROP_FPS)
+    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    
+    out_width = width * scale
+    out_height = height * scale
+    
+    print(f"[INFO] Upscaling video: {width}x{height} -> {out_width}x{out_height}")
+    
+    temp_sr_video = output_path.replace('.mp4', '_sr_temp.mp4')
+    writer = cv2.VideoWriter(temp_sr_video, cv2.VideoWriter_fourcc(*'mp4v'), fps, (out_width, out_height))
+    
+    for _ in tqdm(range(total_frames), desc="Super Resolution"):
+        ret, frame = cap.read()
+        if not ret:
+            break
+        
+        enhanced = enhance_frame(frame, sr_model, sr_type, scale)
+        writer.write(enhanced)
+    
+    cap.release()
+    writer.release()
+    
+    # Merge audio
+    print("[INFO] Merging audio with upscaled video...")
+    ffmpeg_cmd = f'ffmpeg -i "{temp_sr_video}" -i "{audio_path}" -c:v libx264 -c:a aac -crf 18 "{output_path}" -y'
+    os.system(ffmpeg_cmd)
+    
+    if os.path.exists(temp_sr_video):
+        os.remove(temp_sr_video)
 
 
 parser = argparse.ArgumentParser(description='Inference with Super Resolution',
@@ -199,24 +145,12 @@ parser.add_argument('--name', type=str, default="May")
 parser.add_argument('--audio_path', type=str, default="demo/talk_hb.wav")
 parser.add_argument('--start_frame', type=int, default=0)
 parser.add_argument('--parsing', type=bool, default=False)
-parser.add_argument('--sr_type', type=str, default="realesrgan", choices=['realesrgan', 'gfpgan', 'codeformer', 'none'],
-                    help="Super resolution type: realesrgan, gfpgan, codeformer, or none")
-parser.add_argument('--sr_scale', type=int, default=2, help="Super resolution scale factor")
-parser.add_argument('--codeformer_fidelity', type=float, default=0.5, 
-                    help="CodeFormer fidelity weight (0=quality, 1=fidelity)")
+parser.add_argument('--sr_type', type=str, default="realesrgan", choices=['realesrgan', 'gfpgan', 'none'],
+                    help="Super resolution type: realesrgan, gfpgan, or none")
+parser.add_argument('--sr_scale', type=int, default=2, choices=[2, 4], help="Super resolution scale factor")
+parser.add_argument('--face_enhance', action='store_true', 
+                    help='Use GFPGAN for face + Real-ESRGAN for background')
 args = parser.parse_args()
-
-# Setup super resolution model
-print(f"[INFO] Setting up {args.sr_type} super resolution...")
-if args.sr_type == 'realesrgan':
-    sr_model = setup_realesrgan(scale=args.sr_scale)
-elif args.sr_type == 'gfpgan':
-    sr_model = setup_gfpgan()
-elif args.sr_type == 'codeformer':
-    sr_model = setup_codeformer(fidelity_weight=args.codeformer_fidelity)
-else:
-    sr_model = None
-
 
 checkpoint_path = os.path.normpath(os.path.join("./checkpoint", args.name))
 checkpoint_files = [f for f in os.listdir(checkpoint_path) if f.endswith('.pth')]
@@ -226,8 +160,9 @@ print(f"[INFO] Using checkpoint: {checkpoint}")
 
 audio_filename = os.path.basename(args.audio_path).split(".")[0]
 checkpoint_name = os.path.basename(checkpoint).split(".")[0]
-sr_suffix = f"_sr_{args.sr_type}" if args.sr_type != 'none' else ""
+sr_suffix = f"_sr_{args.sr_type}_x{args.sr_scale}" if args.sr_type != 'none' else ""
 save_path = os.path.normpath(os.path.join("./result", f"{args.name}_{audio_filename}_{checkpoint_name}{sr_suffix}.mp4"))
+base_video_path = os.path.normpath(os.path.join("./result", f"{args.name}_{audio_filename}_{checkpoint_name}_base.mp4"))
 
 dataset_dir = os.path.normpath(os.path.join("./dataset", args.name))
 audio_path = args.audio_path
@@ -272,7 +207,7 @@ h, w = exm_img.shape[:2]
 if args.parsing:
     parsing_dir = os.path.join(dataset_dir, "parsing")
 
-temp_video_path = save_path.replace(".mp4", "temp.mp4")
+temp_video_path = base_video_path.replace(".mp4", "_temp.mp4")
 if mode == "hubert" or mode == "ave":
     video_writer = cv2.VideoWriter(temp_video_path, cv2.VideoWriter_fourcc(*'mp4v'), 25, (w, h))
 if mode == "wenet":
@@ -319,8 +254,9 @@ for f_name in all_lms_files:
 smoothed_coords_list = smooth_coordinates(raw_coords, window_size=5)
 smoothed_coords = {int(all_lms_files[i].split('.')[0]): smoothed_coords_list[i] for i in range(total_lms)}
 
-print(f"[INFO] Starting inference with {args.sr_type} super resolution...")
-for i in tqdm(range(audio_feats.shape[0])):
+# Step 1: Generate base video with 328 model
+print(f"[INFO] Step 1: Generating base video with 328 model...")
+for i in tqdm(range(audio_feats.shape[0]), desc="Generating frames"):
     if img_idx > len_img - 1:
         step_stride = -1
     if img_idx < 1:
@@ -391,13 +327,6 @@ for i in tqdm(range(audio_feats.shape[0])):
     pred = pred.cpu().numpy().transpose(1, 2, 0) * 255
     pred = np.array(pred, dtype=np.uint8)
     
-    # Apply super resolution to the predicted mouth region
-    if sr_model is not None and args.sr_type != 'none':
-        # Upscale the 320x320 prediction
-        pred_sr = enhance_face_region(pred, sr_model, args.sr_type)
-        # Resize back to 320x320 (we just want the quality improvement)
-        pred = cv2.resize(pred_sr, (320, 320), interpolation=cv2.INTER_CUBIC)
-    
     crop_img_ori[4:324, 4:324] = pred
     crop_img_ori = cv2.resize(crop_img_ori, (w_crop, h_crop), interpolation=cv2.INTER_CUBIC)
     
@@ -410,9 +339,39 @@ for i in tqdm(range(audio_feats.shape[0])):
 
 video_writer.release()
 
-ffmpeg_cmd = f'ffmpeg -i "{temp_video_path}" -i "{audio_path}" -c:v libx264 -c:a aac -crf 20 "{save_path}" -y'
+# Merge audio with base video
+print("[INFO] Merging audio with base video...")
+ffmpeg_cmd = f'ffmpeg -i "{temp_video_path}" -i "{audio_path}" -c:v libx264 -c:a aac -crf 20 "{base_video_path}" -y'
 os.system(ffmpeg_cmd)
 
 if os.path.exists(temp_video_path):
     os.remove(temp_video_path)
-print(f"[INFO] ===== save video to {save_path} =====")
+
+# Step 2: Apply super resolution to the entire video
+if args.sr_type != 'none':
+    print(f"[INFO] Step 2: Applying {args.sr_type} x{args.sr_scale} super resolution to video...")
+    
+    if args.face_enhance:
+        # GFPGAN for face + Real-ESRGAN for background
+        bg_upsampler = setup_realesrgan(scale=args.sr_scale)
+        sr_model = setup_gfpgan(bg_upsampler=bg_upsampler)
+        sr_type = 'gfpgan'
+    elif args.sr_type == 'gfpgan':
+        sr_model = setup_gfpgan()
+        sr_type = 'gfpgan'
+    else:
+        sr_model = setup_realesrgan(scale=args.sr_scale)
+        sr_type = 'realesrgan'
+    
+    if sr_model is not None:
+        upscale_video(base_video_path, save_path, sr_model, sr_type, args.sr_scale, audio_path)
+        # Clean up base video
+        if os.path.exists(base_video_path):
+            os.remove(base_video_path)
+        print(f"[INFO] ===== Saved SR video to {save_path} =====")
+    else:
+        print(f"[ERROR] Failed to setup SR model. Base video saved to {base_video_path}")
+else:
+    # No SR, just rename base video
+    os.rename(base_video_path, save_path)
+    print(f"[INFO] ===== Saved video to {save_path} =====")
