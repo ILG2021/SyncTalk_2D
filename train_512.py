@@ -56,6 +56,10 @@ class PerceptualLoss():
 logloss = nn.BCELoss()
 def cosine_loss(a, v, y):
     d = nn.functional.cosine_similarity(a, v)
+    # Cosine similarity is in [-1, 1], but BCELoss expects [0, 1].
+    # Map [-1, 1] to [0, 1] and clamp to avoid numerical issues pushing value out of [0, 1].
+    d = (d + 1) / 2
+    d = torch.clamp(d, min=1e-7, max=1-1e-7)
     loss = logloss(d.unsqueeze(1), y)
     return loss
 

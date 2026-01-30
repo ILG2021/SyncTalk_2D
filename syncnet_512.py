@@ -71,13 +71,29 @@ class Dataset(object):
     def __getitem__(self, idx):
         img = cv2.imread(self.img_path_list[idx])
         lms_path = self.lms_path_list[idx]
+        
+        # Randomly choose between positive and negative samples
+        # This makes the SyncNet training meaningful
+        if random.random() > 0.5:
+            # Positive sample: Matching audio features for the current frame
+            audio_feat = self.get_audio_features(self.audio_feats, idx)
+            y = torch.ones(1).float()
+        else:
+            # Negative sample: Random audio features from a different frame
+            random_idx = random.randint(0, self.__len__() - 1)
+            # Ensure it's not the same frame
+            while abs(random_idx - idx) < 5:
+                random_idx = random.randint(0, self.__len__() - 1)
+            audio_feat = self.get_audio_features(self.audio_feats, random_idx)
+            y = torch.zeros(1).float()
+
         img_real_T = self.process_img(img, lms_path)
-        audio_feat = self.get_audio_features(self.audio_feats, idx)
+        
         if self.mode=="ave":
             audio_feat = audio_feat.reshape(32,16,16)
         else:
             audio_feat = audio_feat.reshape(32,32,32)
-        y = torch.ones(1).float()
+        
         return img_real_T, audio_feat, y
 
 class Conv2d(nn.Module):
@@ -151,6 +167,10 @@ class SyncNet_color(nn.Module):
 logloss = nn.BCELoss()
 def cosine_loss(a, v, y):
     d = nn.functional.cosine_similarity(a, v)
+    # Cosine similarity is in [-1, 1], but BCELoss expects [0, 1].
+    # Map [-1, 1] to [0, 1] and clamp to avoid numerical issues pushing value out of [0, 1].
+    d = (d + 1) / 2
+    d = torch.clamp(d, min=1e-7, max=1-1e-7)
     loss = logloss(d.unsqueeze(1), y)
     return loss
 def train(save_dir, dataset_dir, mode):
@@ -162,6 +182,7 @@ def train(save_dir, dataset_dir, mode):
     optimizer = optim.Adam([p for p in model.parameters() if p.requires_grad], lr=0.001)
     best_loss = 1000000
     for epoch in range(100):
+        total_loss = 0
         for batch in train_data_loader:
             imgT, audioT, y = batch
             imgT = imgT.cuda()
@@ -172,9 +193,12 @@ def train(save_dir, dataset_dir, mode):
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
-        print(epoch+1, loss.item())
-        if loss.item() < best_loss:
-            best_loss = loss.item()
+            total_loss += loss.item()
+        
+        avg_loss = total_loss / len(train_data_loader)
+        print(f"Epoch {epoch+1}, Loss: {avg_loss:.6f}")
+        if avg_loss < best_loss:
+            best_loss = avg_loss
             torch.save(model.state_dict(), os.path.join(save_dir, str(epoch+1)+'.pth'))
 
 if __name__ == "__main__":

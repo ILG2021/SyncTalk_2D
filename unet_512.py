@@ -202,11 +202,11 @@ class Model(nn.Module):
         )
 
         self.inc = InConvDw(n_channels, ch[0])
-        self.down1 = Down(ch[0], ch[1])
-        self.down2 = Down(ch[1], ch[2])
-        self.down3 = Down(ch[2], ch[3])
-        self.down4 = Down(ch[3], ch[4])
-        self.down5 = Down(ch[4], ch[4])
+        self.down1 = Down(ch[0], ch[0])  # 32 -> 32 (256x256)
+        self.down2 = Down(ch[0], ch[1])  # 32 -> 64 (128x128)
+        self.down3 = Down(ch[1], ch[2])  # 64 -> 128 (64x64)
+        self.down4 = Down(ch[2], ch[3])  # 128 -> 256 (32x32)
+        self.down5 = Down(ch[3], ch[4])  # 256 -> 512 (16x16)
 
         self.up1 = Up(ch[4], ch[3]//2)
         self.up2 = Up(ch[3], ch[2]//2)

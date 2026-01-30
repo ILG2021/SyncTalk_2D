@@ -24,7 +24,8 @@ def extract_images(path):
     fps = cap.get(cv2.CAP_PROP_FPS)
     if abs(fps - 25) > 0.1: # More robust than != 25
         # High quality conversion to 25fps using ffmpeg
-        out_25 = path.replace(".mp4", "_25fps.mp4")
+        name, ext = os.path.splitext(path)
+        out_25 = f"{name}_25fps.mp4"
         cmd = f'ffmpeg -i "{path}" -vf "fps=25" -c:v libx264 -c:a aac "{out_25}" -y'
         os.system(cmd)
         path = out_25
