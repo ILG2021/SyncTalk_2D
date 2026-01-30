@@ -20,8 +20,8 @@ def get_args():
     parser.add_argument('--syncnet_checkpoint', type=str, default="")
     parser.add_argument('--dataset_dir', type=str)
     parser.add_argument('--save_dir', type=str, help="trained model save path.")
-    parser.add_argument('--see_res', action='store_true')
-    parser.add_argument('--epochs', type=int, default=100)
+    parser.add_argument('--see_res', action='store_false', default=True, help="Set to disable result visualization during training.")
+    parser.add_argument('--epochs', type=int, default=50)
     parser.add_argument('--batchsize', type=int, default=8)
     parser.add_argument('--lr', type=float, default=0.001)
     parser.add_argument('--asr', type=str, default="hubert")
@@ -128,6 +128,8 @@ def train(net, epoch, batch_size, lr):
             pred = np.array(pred, dtype=np.uint8)
             img_real = img_real_T.numpy().transpose(1,2,0)*255
             img_real = np.array(img_real, dtype=np.uint8)
+            if not os.path.exists("./train_tmp_img"):
+                os.makedirs("./train_tmp_img")
             cv2.imwrite("./train_tmp_img/epoch_"+str(e)+".jpg", pred)
             cv2.imwrite("./train_tmp_img/epoch_"+str(e)+"_real.jpg", img_real)
         

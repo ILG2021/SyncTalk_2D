@@ -81,7 +81,22 @@ class MyDataset(Dataset):
         img_real_ori = img_real.copy()
         img_masked = cv2.rectangle(img_real,(8,8,496,488),(0,0,0),-1)
         
-        crop_img_ex = img_ex[ymin:ymax, xmin:xmax]
+        # Correctly crop the reference frame using its own landmarks
+        lms_list_ex = []
+        with open(lms_path_ex, "r") as f:
+            lines = f.read().splitlines()
+            for line in lines:
+                arr = line.split(" ")
+                arr = np.array(arr, dtype=np.float32)
+                lms_list_ex.append(arr)
+        lms_ex = np.array(lms_list_ex, dtype=np.int32)
+        xmin_ex = lms_ex[1][0]
+        ymin_ex = lms_ex[52][1]
+        xmax_ex = lms_ex[31][0]
+        width_ex = xmax_ex - xmin_ex
+        ymax_ex = ymin_ex + width_ex
+
+        crop_img_ex = img_ex[ymin_ex:ymax_ex, xmin_ex:xmax_ex]
         crop_img_ex = cv2.resize(crop_img_ex, (520, 520), cv2.INTER_AREA)
         img_real_ex = crop_img_ex[4:516, 4:516].copy()
         

@@ -241,7 +241,7 @@ def train(save_dir, dataset_dir, mode):
     optimizer = optim.Adam([p for p in model.parameters() if p.requires_grad],
                            lr=0.001)
     best_loss = 1000000
-    for epoch in range(100):
+    for epoch in range(50):
         for batch in train_data_loader:
             imgT, audioT, y = batch
             imgT = imgT.cuda()

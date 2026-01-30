@@ -21,7 +21,7 @@ def get_args():
     parser.add_argument('--syncnet_checkpoint', type=str, default="")
     parser.add_argument('--dataset_dir', type=str)
     parser.add_argument('--save_dir', type=str)
-    parser.add_argument('--see_res', action='store_true')
+    parser.add_argument('--see_res', action='store_false', default=True, help="Set to disable result visualization during training.")
     parser.add_argument('--epochs', type=int, default=100)
     parser.add_argument('--batchsize', type=int, default=8)
     parser.add_argument('--lr', type=float, default=0.001)

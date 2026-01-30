@@ -23,6 +23,8 @@ parser.add_argument('--name', type=str, default="May")
 parser.add_argument('--audio_path', type=str, default="demo/talk_hb.wav")
 parser.add_argument('--start_frame', type=int, default=0)
 parser.add_argument('--parsing', type=bool, default=False)
+parser.add_argument('--face_restore', action='store_true', help='Use GFPGAN to enhance face/mouth clarity')
+parser.add_argument('--up_scale', type=int, default=1, help='Upscale factor for face restoration')
 args = parser.parse_args()
 
 checkpoint_path = os.path.normpath(os.path.join("./checkpoint", args.name))
@@ -93,6 +95,33 @@ img_idx = 0
 net = Model(6, mode).cuda()
 net.load_state_dict(torch.load(checkpoint))
 net.eval()
+
+# Initialize Face Restorer (GFPGAN)
+restorer = None
+if args.face_restore:
+    try:
+        from gfpgan import GFPGANer
+        # If you use CodeFormer, you can adapt this part
+        # model_path should point to your GFPGAN weights, e.g., 'weights/GFPGANv1.4.pth'
+        model_path = 'model/checkpoints/GFPGANv1.4.pth'
+        if not os.path.exists(model_path):
+            print(f"[INFO] GFPGAN weight not found at {model_path}. Downloading...")
+            os.makedirs(os.path.dirname(model_path), exist_ok=True)
+            url = 'https://github.com/TencentARC/GFPGAN/releases/download/v1.3.0/GFPGANv1.4.pth'
+            torch.hub.download_url_to_file(url, model_path)
+            print(f"[INFO] GFPGAN downloaded to {model_path}")
+        
+        restorer = GFPGANer(
+            model_path=model_path,
+            upscale=args.up_scale,
+            arch='clean',
+            channel_multiplier=2,
+            device=device
+        )
+        print("[INFO] Face Restorer (GFPGAN) loaded successfully.")
+    except ImportError:
+        print("[ERROR] GFPGAN not found. Please install it via 'pip install gfpgan'.")
+        args.face_restore = False
 
 
 # Function to smooth coordinates
@@ -208,10 +237,18 @@ for i in tqdm(range(audio_feats.shape[0])):
 
     pred = pred.cpu().numpy().transpose(1, 2, 0) * 255
     pred = np.array(pred, dtype=np.uint8)
-    # if args.parsing:  # 读取语义分割图,[0, 0, 255]的区域使用ori img,不用pred的结果
-    # parsing_mask = (crop_parsing_img[4:324, 4:324] == [0, 0, 255]).all(axis=2)
-    # pred[parsing_mask] = img_real_ex_ori_ori[parsing_mask]
-    crop_img_ori[4:324, 4:324] = pred
+    
+    # Apply Face Restoration (Super-Resolution)
+    if args.face_restore and restorer is not None:
+        # We restore the crop_img_ori after putting pred back into it
+        # or restore pred directly. Restoring the whole crop_img_ori (328x328) is better.
+        crop_img_ori[4:324, 4:324] = pred
+        # The input to GFPGANer.enhance is (img, has_aligned, only_center_face, paste_back)
+        _, _, restored_face = restorer.enhance(crop_img_ori, has_aligned=False, only_center_face=True, paste_back=True)
+        crop_img_ori = restored_face
+    else:
+        crop_img_ori[4:324, 4:324] = pred
+    
     crop_img_ori = cv2.resize(crop_img_ori, (w_crop, h_crop), interpolation=cv2.INTER_CUBIC)
     if args.parsing:  # 读取语义分割图,[0, 0, 255]和[255, 255, 255]的区域使用ori img,不用pred的结果
         parsing_mask = (crop_parsing_img == [0, 0, 255]).all(axis=2) | (crop_parsing_img == [255, 255, 255]).all(axis=2)

@@ -22,17 +22,21 @@ def extract_images(path):
     counter = 0
     cap = cv2.VideoCapture(path)
     fps = cap.get(cv2.CAP_PROP_FPS)
-    if abs(fps - 25) > 0.1: # More robust than != 25
-        # High quality conversion to 25fps using ffmpeg
-        name, ext = os.path.splitext(path)
+    
+    name, ext = os.path.splitext(path)
+    # 增加对 .mov 的判断，或者如果 fps 不是 25，统一转码
+    if ext.lower() == '.mov' or abs(fps - 25) > 0.1:
+        print(f'[INFO] Converting {ext} video to 25fps mp4 for compatibility...')
         out_25 = f"{name}_25fps.mp4"
+        # 使用 libx264 确保兼容性
         cmd = f'ffmpeg -i "{path}" -vf "fps=25" -c:v libx264 -c:a aac "{out_25}" -y'
         os.system(cmd)
         path = out_25
-    
-    cap = cv2.VideoCapture(path)
-    fps = cap.get(cv2.CAP_PROP_FPS)
-    if abs(fps - 25) > 0.6: # Allow minor precision differences
+        # 重新打开转码后的视频
+        cap = cv2.VideoCapture(path)
+        fps = cap.get(cv2.CAP_PROP_FPS)
+
+    if abs(fps - 25) > 0.6: 
         raise ValueError(f"Your video fps should be 25, but it is {fps}!!!")
         
     print("extracting images...")
