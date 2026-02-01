@@ -2,55 +2,56 @@
 import os
 import torch
 import torch.nn.functional as F
-import soundfile as sf
 import numpy as np
 import argparse
+import librosa
 from transformers import HubertModel, Wav2Vec2Processor
 
 def extract_hubert(wav_path, device='cuda'):
-    print(f"Extracting Hubert features from {wav_path}...")
+    print(f"[INFO] Extracting Hubert features from {wav_path}...")
     
-    # Load model and processor
+    # 使用和 Ultralight-Digital-Human 一致的模型
     model_name = "facebook/hubert-large-ls960-ft"
     processor = Wav2Vec2Processor.from_pretrained(model_name)
     model = HubertModel.from_pretrained(model_name).to(device)
     model.eval()
 
-    # Load audio
-    speech, sample_rate = sf.read(wav_path)
-    if sample_rate != 16000:
-        import librosa
-        speech = librosa.resample(speech, orig_sr=sample_rate, target_sr=16000)
-        sample_rate = 16000
+    # 使用 librosa 加载，强制单声道和 16000Hz 采样率
+    speech, _ = librosa.load(wav_path, sr=16000, mono=True)
     
-    # Process audio
+    # 处理音频输入
     input_values = processor(speech, return_tensors="pt", sampling_rate=16000).input_values.to(device)
     
     with torch.no_grad():
-        # Get hidden states, use layer 12 (middle/late layer often good for lip sync) or last layer
-        outputs = model(input_values)
-        # last_hidden_state shape: [1, T_hubert, 1024]
-        feats = outputs.last_hidden_state.squeeze(0) # [T_hubert, 1024]
+        # 提取特征。参考 Ultralight-Digital-Human，通常使用中间层特征
+        outputs = model(input_values, output_hidden_states=True)
+        # 使用第 12 层特征 (indices 0-24, 12 是中间层)
+        # 或者使用最后一层，这里我们使用 hidden_states[12]
+        feats = outputs.hidden_states[12].squeeze(0) # [T_hubert, 1024]
 
     feats = feats.cpu().numpy()
     
-    # Hubert output is 50Hz, Video is 25Hz
-    # Group every 2 Hubert frames into 1 video frame (1024 * 2 = 2048)
+    # Hubert 输出是 50Hz，视频是 25Hz
+    # 将每两个 Hubert 帧合并为一个视频帧 (1024 * 2 = 2048 维度)
     T_hu = feats.shape[0]
+    
+    # 确保长度为偶数便于 reshape
     if T_hu % 2 != 0:
         feats = np.concatenate([feats, feats[-1:]], axis=0)
         T_hu += 1
     
-    feats = feats.reshape(-1, 2048) # [T_video, 2048]
+    # 重塑为 [T_video, 2048]
+    feats = feats.reshape(-1, 2048)
     
-    # Padding: first and last frame repeat (matching ave script behavior)
+    # 前后各补一帧（匹配该项目 datasetsss_328.py 的读取逻辑和 ave 的补帧习惯）
     first_frame = feats[0:1]
     last_frame = feats[-1:]
     feats = np.concatenate([first_frame, feats, last_frame], axis=0)
     
+    # 保存路径：SyncNet 和 Dataset 脚本默认读取 aud_hu.npy
     save_path = wav_path.replace('.wav', '_hu.npy')
     np.save(save_path, feats)
-    print(f"Hubert features saved to {save_path}, shape: {feats.shape}")
+    print(f"[SUCCESS] Hubert features saved to {save_path}, final shape: {feats.shape}")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -58,4 +59,9 @@ if __name__ == "__main__":
     args = parser.parse_args()
     
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
-    extract_hubert(args.wav_path, device)
+    try:
+        extract_hubert(args.wav_path, device)
+    except Exception as e:
+        print(f"[ERROR] Hubert extraction failed: {e}")
+        import traceback
+        traceback.print_exc()

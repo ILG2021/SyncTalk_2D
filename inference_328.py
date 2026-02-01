@@ -61,23 +61,20 @@ def main():
     elif mode == "hubert":
         print(f"[INFO] Using Hubert mode for audio features...")
         from transformers import HubertModel, Wav2Vec2Processor
-        import soundfile as sf
+        import librosa
         hubert_model_name = "facebook/hubert-large-ls960-ft"
         processor = Wav2Vec2Processor.from_pretrained(hubert_model_name)
         hubert_model = HubertModel.from_pretrained(hubert_model_name).to(device)
         hubert_model.eval()
 
-        speech, sample_rate = sf.read(audio_path)
-        if sample_rate != 16000:
-            import librosa
-            speech = librosa.resample(speech, orig_sr=sample_rate, target_sr=16000)
-            sample_rate = 16000
+        # 使用 librosa 确保单声道 16000Hz
+        speech, _ = librosa.load(audio_path, sr=16000, mono=True)
         
         input_values = processor(speech, return_tensors="pt", sampling_rate=16000).input_values.to(device)
         with torch.no_grad():
-            outputs = hubert_model(input_values)
-            # last_hidden_state shape: [1, T_hubert, 1024]
-            feats = outputs.last_hidden_state.squeeze(0).cpu().numpy()
+            outputs = hubert_model(input_values, output_hidden_states=True)
+            # 统一使用第 12 层特征
+            feats = outputs.hidden_states[12].squeeze(0).cpu().numpy()
         
         # Hubert is 50Hz, Video is 25Hz -> Reshape to concatenation of pairs
         T_hu = feats.shape[0]
