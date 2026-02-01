@@ -37,8 +37,7 @@ class Dataset(object):
         self.audio_feats = self.audio_feats.astype(np.float32)
         
     def __len__(self):
-
-        return self.audio_feats.shape[0]-1
+        return min(len(self.img_path_list), self.audio_feats.shape[0])
 
     def get_audio_features(self, features, index):
         

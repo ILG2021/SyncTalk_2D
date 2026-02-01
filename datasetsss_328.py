@@ -36,9 +36,7 @@ class MyDataset(Dataset):
         print(len(self.img_path_list))
         
     def __len__(self):
-        # return len(self.img_path_list)-1
-        # return len(self.img_path_list)
-        return self.audio_feats.shape[0]-1
+        return min(len(self.img_path_list), self.audio_feats.shape[0])
     
     def get_audio_features(self, features, index):
         left = index - 8

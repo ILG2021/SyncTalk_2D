@@ -43,11 +43,6 @@ def extract_hubert(wav_path, device='cuda'):
     # 重塑为 [T_video, 2048]
     feats = feats.reshape(-1, 2048)
     
-    # 前后各补一帧（匹配该项目 datasetsss_328.py 的读取逻辑和 ave 的补帧习惯）
-    first_frame = feats[0:1]
-    last_frame = feats[-1:]
-    feats = np.concatenate([first_frame, feats, last_frame], axis=0)
-    
     # 保存路径：SyncNet 和 Dataset 脚本默认读取 aud_hu.npy
     save_path = wav_path.replace('.wav', '_hu.npy')
     np.save(save_path, feats)

@@ -82,11 +82,7 @@ def main():
             feats = np.concatenate([feats, feats[-1:]], axis=0)
             T_hu += 1
         feats = feats.reshape(-1, 2048)
-        
-        # Padding: first and last frame repeat
-        first_frame = feats[0:1]
-        last_frame = feats[-1:]
-        audio_feats = np.concatenate([first_frame, feats, last_frame], axis=0)
+        audio_feats = feats
     else:
         raise ValueError(f"Unsupported ASR mode: {mode}")
 
