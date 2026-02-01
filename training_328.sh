@@ -3,7 +3,7 @@
 file_name=$1
 cuda_id=$2
 asr="ave"
-file_path="./dataset/$file_name/$file_name.mp4"
+file_path="./dataset/$file_name/$file_name.mov"
 data_dir="./dataset/$file_name"
 
 CUDA_VISIBLE_DEVICES=$cuda_id python data_utils/process.py $file_path
