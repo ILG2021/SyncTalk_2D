@@ -40,21 +40,59 @@ def main():
 
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    model = AudioEncoder().to(device).eval()
-    ckpt = torch.load('model/checkpoints/audio_visual_encoder.pth')
-    model.load_state_dict({f'audio_encoder.{k}': v for k, v in ckpt.items()})
-    dataset = AudDataset(audio_path)
-    data_loader = DataLoader(dataset, batch_size=64, shuffle=False)
-    outputs = []
-    for mel in data_loader:
-        mel = mel.to(device)
+    
+    if mode == "ave":
+        print(f"[INFO] Using AVE mode for audio features...")
+        model = AudioEncoder().to(device).eval()
+        ckpt = torch.load('model/checkpoints/audio_visual_encoder.pth')
+        model.load_state_dict({f'audio_encoder.{k}': v for k, v in ckpt.items()})
+        dataset = AudDataset(audio_path)
+        data_loader = DataLoader(dataset, batch_size=64, shuffle=False)
+        outputs = []
+        for mel in data_loader:
+            mel = mel.to(device)
+            with torch.no_grad():
+                out = model(mel)
+            outputs.append(out)
+        outputs = torch.cat(outputs, dim=0).cpu()
+        first_frame, last_frame = outputs[:1], outputs[-1:]
+        audio_feats = torch.cat([first_frame.repeat(1, 1), outputs, last_frame.repeat(1, 1)],
+                                    dim=0).numpy()
+    elif mode == "hubert":
+        print(f"[INFO] Using Hubert mode for audio features...")
+        from transformers import HubertModel, Wav2Vec2Processor
+        import soundfile as sf
+        hubert_model_name = "facebook/hubert-large-ls960-ft"
+        processor = Wav2Vec2Processor.from_pretrained(hubert_model_name)
+        hubert_model = HubertModel.from_pretrained(hubert_model_name).to(device)
+        hubert_model.eval()
+
+        speech, sample_rate = sf.read(audio_path)
+        if sample_rate != 16000:
+            import librosa
+            speech = librosa.resample(speech, orig_sr=sample_rate, target_sr=16000)
+            sample_rate = 16000
+        
+        input_values = processor(speech, return_tensors="pt", sampling_rate=16000).input_values.to(device)
         with torch.no_grad():
-            out = model(mel)
-        outputs.append(out)
-    outputs = torch.cat(outputs, dim=0).cpu()
-    first_frame, last_frame = outputs[:1], outputs[-1:]
-    audio_feats = torch.cat([first_frame.repeat(1, 1), outputs, last_frame.repeat(1, 1)],
-                                dim=0).numpy()
+            outputs = hubert_model(input_values)
+            # last_hidden_state shape: [1, T_hubert, 1024]
+            feats = outputs.last_hidden_state.squeeze(0).cpu().numpy()
+        
+        # Hubert is 50Hz, Video is 25Hz -> Reshape to concatenation of pairs
+        T_hu = feats.shape[0]
+        if T_hu % 2 != 0:
+            feats = np.concatenate([feats, feats[-1:]], axis=0)
+            T_hu += 1
+        feats = feats.reshape(-1, 2048)
+        
+        # Padding: first and last frame repeat
+        first_frame = feats[0:1]
+        last_frame = feats[-1:]
+        audio_feats = np.concatenate([first_frame, feats, last_frame], axis=0)
+    else:
+        raise ValueError(f"Unsupported ASR mode: {mode}")
+
     img_dir = os.path.join(dataset_dir, "full_body_img")
     lms_dir = os.path.join(dataset_dir, "landmarks")
     len_img = len(os.listdir(img_dir)) - 1

@@ -48,13 +48,19 @@ def extract_images(path):
         counter += 1
 
 
-def get_audio_feature(wav_path):
-    print("extracting audio feature...")
+def get_audio_feature(wav_path, asr_mode="ave"):
+    print(f"extracting audio feature using {asr_mode}...")
     import sys
     import subprocess
 
-    # 转换为绝对路径，彻底消除“找不到路径”的问题
-    script_path = os.path.abspath("./data_utils/ave/test_w2l_audio.py")
+    if asr_mode == "ave":
+        script_path = os.path.abspath("./data_utils/ave/test_w2l_audio.py")
+    elif asr_mode == "hubert":
+        script_path = os.path.abspath("./data_utils/hubert.py")
+    else:
+        print(f"[ERROR] Unsupported ASR mode: {asr_mode}")
+        return
+
     wav_path = os.path.abspath(wav_path)
 
     if not os.path.exists(script_path):
@@ -98,6 +104,7 @@ if __name__ == "__main__":
     
     parser = argparse.ArgumentParser()
     parser.add_argument('path', type=str, help="path to video file")
+    parser.add_argument('--asr', type=str, default='ave', choices=['ave', 'hubert'], help="ASR mode for audio features")
     opt = parser.parse_args()
 
     base_dir = os.path.dirname(opt.path)
@@ -109,6 +116,6 @@ if __name__ == "__main__":
     extract_audio(opt.path, wav_path)
     extract_images(opt.path)
     get_landmark(opt.path, landmarks_dir)
-    get_audio_feature(wav_path)
+    get_audio_feature(wav_path, opt.asr)
     
     
