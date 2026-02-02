@@ -57,6 +57,8 @@ def get_audio_feature(wav_path, asr_mode="ave"):
         script_path = os.path.abspath("./data_utils/ave/test_w2l_audio.py")
     elif asr_mode == "hubert":
         script_path = os.path.abspath("./data_utils/hubert.py")
+    elif asr_mode == "whisper":
+        script_path = os.path.abspath("./data_utils/whisper_extract.py")
     else:
         print(f"[ERROR] Unsupported ASR mode: {asr_mode}")
         return
@@ -104,7 +106,7 @@ if __name__ == "__main__":
     
     parser = argparse.ArgumentParser()
     parser.add_argument('path', type=str, help="path to video file")
-    parser.add_argument('--asr', type=str, default='ave', choices=['ave', 'hubert'], help="ASR mode for audio features")
+    parser.add_argument('--asr', type=str, default='ave', choices=['ave', 'hubert', 'whisper'], help="ASR mode for audio features")
     opt = parser.parse_args()
 
     base_dir = os.path.dirname(opt.path)

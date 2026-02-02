@@ -21,12 +21,35 @@ def main():
     parser.add_argument('--asr', type=str, default="ave")
     parser.add_argument('--name', type=str, default="May")
     parser.add_argument('--audio_path', type=str, default="demo/talk_hb.wav")
+    parser.add_argument('--template', type=str, default="", help="Subfolder name in preprocess/ to use as template. If empty, uses the first one found.")
     parser.add_argument('--start_frame', type=int, default=0)
     parser.add_argument('--parsing', type=bool, default=False)
     args = parser.parse_args()
 
     checkpoint_path = os.path.join("./checkpoint", args.name)
-    # 获取checkpoint_path目录下数字最大的.pth文件，按照int排序
+    person_data_root = os.path.join("./dataset", args.name)
+    
+    # 自动定位预处理后的模版文件夹
+    preprocess_dir = os.path.join(person_data_root, "preprocess")
+    if os.path.exists(preprocess_dir):
+        subfolders = [f for f in os.listdir(preprocess_dir) if os.path.isdir(os.path.join(preprocess_dir, f))]
+        if not subfolders:
+            raise FileNotFoundError(f"No processed subfolders found in {preprocess_dir}")
+        
+        # 如果指定了 template
+        if args.template and args.template in subfolders:
+            template_folder = args.template
+        else:
+            template_folder = subfolders[0]
+            if args.template:
+                print(f"[WARNING] Template '{args.template}' not found. Using '{template_folder}' instead.")
+        
+        dataset_dir = os.path.join(preprocess_dir, template_folder)
+        print(f"[INFO] Using inference template: {dataset_dir}")
+    else:
+        # 向下兼容旧的单文件夹结构
+        dataset_dir = person_data_root
+        print(f"[INFO] Falling back to legacy data path: {dataset_dir}")
     checkpoint = os.path.join(checkpoint_path, sorted(os.listdir(checkpoint_path), key=lambda x: int(x.split(".")[0]))[-1])
     print(checkpoint)
     
@@ -83,6 +106,33 @@ def main():
             T_hu += 1
         feats = feats.reshape(-1, 2048)
         audio_feats = feats
+    elif mode == "whisper":
+        print(f"[INFO] Using Whisper mode (Tiny) for audio features...")
+        from transformers import WhisperModel, WhisperProcessor
+        import librosa
+        whisper_model_name = "openai/whisper-tiny"
+        processor = WhisperProcessor.from_pretrained(whisper_model_name)
+        whisper_model = WhisperModel.from_pretrained(whisper_model_name).to(device)
+        whisper_model.eval()
+
+        speech, _ = librosa.load(audio_path, sr=16000, mono=True)
+        input_features = processor(speech, return_tensors="pt", sampling_rate=16000).input_features.to(device)
+        
+        with torch.no_grad():
+            encoder_outputs = whisper_model.encoder(input_features)
+            feats = encoder_outputs.last_hidden_state.squeeze(0).cpu().numpy()
+        
+        # 截断到实际长度
+        audio_len_s = len(speech) / 16000
+        expected_hu_frames = int(audio_len_s * 50)
+        feats = feats[:expected_hu_frames]
+
+        if feats.shape[0] % 2 != 0:
+            feats = np.concatenate([feats, feats[-1:]], axis=0)
+        
+        # Tiny: 384 * 2 = 768
+        feats = feats.reshape(-1, 768)
+        audio_feats = feats
     else:
         raise ValueError(f"Unsupported ASR mode: {mode}")
 
@@ -95,7 +145,7 @@ def main():
         parsing_dir = os.path.join(dataset_dir, "parsing")
 
     temp_video_path = save_path.replace(".mp4", "temp.mp4")
-    if mode=="hubert" or mode=="ave":
+    if mode=="hubert" or mode=="ave" or mode=="whisper":
         video_writer = cv2.VideoWriter(temp_video_path, cv2.VideoWriter_fourcc(*'mp4v'), 25, (w, h))
     if mode=="wenet":
         video_writer = cv2.VideoWriter(temp_video_path, cv2.VideoWriter_fourcc(*'mp4v'), 20, (w, h))
@@ -164,6 +214,8 @@ def main():
             audio_feat = audio_feat.reshape(256,16,32)
         if mode=="ave":
             audio_feat = audio_feat.reshape(32,16,16)
+        if mode=="whisper":
+            audio_feat = audio_feat.reshape(12,32,32)
         audio_feat = audio_feat[None]
         audio_feat = audio_feat.to(device)
         img_concat_T = img_concat_T.to(device)

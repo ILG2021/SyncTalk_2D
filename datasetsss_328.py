@@ -10,11 +10,12 @@ from torch.utils.data import DataLoader
 
 class MyDataset(Dataset):
     
-    def __init__(self, img_dir, mode):
+    def __init__(self, img_dir, mode, temporal=False):
     
         self.img_path_list = []
         self.lms_path_list = []
         self.mode = mode
+        self.temporal = temporal
         
         for i in range(len(os.listdir(img_dir+"/full_body_img/"))):
 
@@ -29,6 +30,8 @@ class MyDataset(Dataset):
             self.audio_feats = np.load(img_dir+"/aud_hu.npy")
         if self.mode == "ave":
             self.audio_feats = np.load(img_dir+"/aud_ave.npy")
+        if self.mode == "whisper":
+            self.audio_feats = np.load(img_dir+"/aud_whisper.npy")
             
         self.audio_feats = self.audio_feats.astype(np.float32)
         print(img_dir)
@@ -143,7 +146,30 @@ class MyDataset(Dataset):
             audio_feat = audio_feat.reshape(32,32,32)
         if self.mode == "ave":
             audio_feat = audio_feat.reshape(32,16,16)
+        if self.mode == "whisper":
+            audio_feat = audio_feat.reshape(12,32,32)
         
+        if self.temporal:
+            # 获取前一帧的数据实现时序一致性损失
+            prev_idx = max(0, idx - 1)
+            img_prev = cv2.imread(self.img_path_list[prev_idx])
+            lms_path_prev = self.lms_path_list[prev_idx]
+            
+            # 使用相同的参考帧 img_ex 进行拼接，保证背景一致
+            img_concat_T_prev, img_real_T_prev = self.process_img(img_prev, lms_path_prev, img_ex, lms_path_ex)
+            audio_feat_prev = self.get_audio_features(self.audio_feats, prev_idx)
+            
+            if self.mode == "wenet":
+                audio_feat_prev = audio_feat_prev.reshape(256,16,32)
+            if self.mode == "hubert":
+                audio_feat_prev = audio_feat_prev.reshape(32,32,32)
+            if self.mode == "ave":
+                audio_feat_prev = audio_feat_prev.reshape(32,16,16)
+            if self.mode == "whisper":
+                audio_feat_prev = audio_feat_prev.reshape(12,32,32)
+            
+            return img_concat_T, img_real_T, audio_feat, img_concat_T_prev, img_real_T_prev, audio_feat_prev
+
         return img_concat_T, img_real_T, audio_feat
     
         

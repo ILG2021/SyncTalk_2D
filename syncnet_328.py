@@ -32,6 +32,8 @@ class Dataset(object):
             audio_feats_path = os.path.join(dataset_dir, "aud_hu.npy")
         if mode=="ave":
             audio_feats_path = os.path.join(dataset_dir, "aud_ave.npy")
+        if mode=="whisper":
+            audio_feats_path = os.path.join(dataset_dir, "aud_whisper.npy")
         self.mode = mode
         self.audio_feats = np.load(audio_feats_path)
         self.audio_feats = self.audio_feats.astype(np.float32)
@@ -102,6 +104,8 @@ class Dataset(object):
         # audio_feat = audio_feat.reshape(128,16,32)
         if self.mode=="ave":
             audio_feat = audio_feat.reshape(32,16,16)
+        elif self.mode=="whisper":
+            audio_feat = audio_feat.reshape(12,32,32)
         else:
             audio_feat = audio_feat.reshape(32,32,32)
         y = torch.ones(1).float()
@@ -189,6 +193,9 @@ class SyncNet_color(nn.Module):
         if mode == "ave":
             p1 = 32
             p2 = 1
+        if mode == "whisper":
+            p1 = 12
+            p2 = 1
         self.audio_encoder = nn.Sequential(
             Conv2d(p1, 128, kernel_size=3, stride=1, padding=1),
             Conv2d(128, 128, kernel_size=3, stride=1, padding=1, residual=True),
@@ -227,15 +234,29 @@ def cosine_loss(a, v, y):
     loss = logloss(d.unsqueeze(1), y)
 
     return loss
-    
 def train(save_dir, dataset_dir, mode):
     if not os.path.exists(save_dir):
         os.makedirs(save_dir, exist_ok=True)
         
-    train_dataset = Dataset(dataset_dir, mode=mode)
-    train_data_loader = DataLoader(
-        train_dataset, batch_size=128, shuffle=True,
-        num_workers=16, pin_memory=True, persistent_workers=True)
+    dataset_dir_list = []
+    dirs = [d.strip() for d in dataset_dir.split(',')]
+    for d in dirs:
+        if os.path.exists(os.path.join(d, "full_body_img")):
+            dataset_dir_list.append(d)
+        else:
+            for sub in os.listdir(d):
+                sub_path = os.path.join(d, sub)
+                if os.path.isdir(sub_path) and os.path.exists(os.path.join(sub_path, "full_body_img")):
+                    dataset_dir_list.append(sub_path)
+    
+    dataloaders = []
+    for d_dir in dataset_dir_list:
+        train_dataset = Dataset(d_dir, mode=mode)
+        train_data_loader = DataLoader(
+            train_dataset, batch_size=128, shuffle=True,
+            num_workers=16, pin_memory=True, persistent_workers=True)
+        dataloaders.append(train_data_loader)
+
     model = SyncNet_color(mode).cuda()
     optimizer = optim.Adam([p for p in model.parameters() if p.requires_grad],
                            lr=0.001)
@@ -255,15 +276,17 @@ def train(save_dir, dataset_dir, mode):
 
     best_loss = 1000000
     for epoch in range(start_epoch, 100):
-        for batch in train_data_loader:
-            imgT, audioT, y = batch
-            imgT = imgT.cuda()
-            audioT = audioT.cuda()
-            y = y.cuda()
-            audio_embedding, face_embedding = model(imgT, audioT)
-            loss = cosine_loss(audio_embedding, face_embedding, y)
-            loss.backward()
-            optimizer.step()
+        for train_data_loader in dataloaders:
+            for batch in train_data_loader:
+                imgT, audioT, y = batch
+                imgT = imgT.cuda()
+                audioT = audioT.cuda()
+                y = y.cuda()
+                audio_embedding, face_embedding = model(imgT, audioT)
+                loss = cosine_loss(audio_embedding, face_embedding, y)
+                loss.backward()
+                optimizer.step()
+                optimizer.zero_grad() # 补上 zero_grad
         print(f"Epoch {epoch+1}, Loss: {loss.item()}")
         if loss.item() < best_loss:
             best_loss = loss.item()
@@ -277,7 +300,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('--save_dir', default='test', type=str)
     parser.add_argument('--dataset_dir', default='./dataset/May', type=str)
-    parser.add_argument('--asr', default='ave', type=str)
+    parser.add_argument('--asr', default='ave', choices=['ave', 'hubert', 'whisper'], type=str)
     opt = parser.parse_args()
     
     train(opt.save_dir, opt.dataset_dir, opt.asr)
