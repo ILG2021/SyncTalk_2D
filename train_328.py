@@ -107,6 +107,7 @@ def train(net, epoch, batch_size, lr):
     print(f"[INFO] Found {len(dataset_dir_list)} datasets: {dataset_dir_list}")
     
     dataloader_list = []
+    dataset_list= []
     for dataset_dir in dataset_dir_list:
         dataset = MyDataset(dataset_dir, args.asr, temporal=args.temporal)
         train_dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True, drop_last=True, num_workers=4,
