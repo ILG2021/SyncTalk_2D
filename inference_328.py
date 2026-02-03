@@ -18,7 +18,7 @@ def main():
     parser = argparse.ArgumentParser(description='Train',
                                          formatter_class=argparse.ArgumentDefaultsHelpFormatter)
 
-    parser.add_argument('--asr', type=str, default="ave")
+    parser.add_argument('--asr', type=str, default="hubert")
     parser.add_argument('--name', type=str, default="May")
     parser.add_argument('--audio_path', type=str, default="demo/talk_hb.wav")
     parser.add_argument('--start_frame', type=int, default=0)
