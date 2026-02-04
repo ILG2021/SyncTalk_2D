@@ -29,7 +29,8 @@ def get_args():
     parser.add_argument('--lr', type=float, default=0.001)
     parser.add_argument('--asr', type=str, default="hubert")
     parser.add_argument('--temporal', action='store_true', help="Enable temporal consistency loss")
-    parser.add_argument('--temporal_weight', type=float, default=0.05, help="Weight for temporal loss")
+    parser.add_argument('--temporal_weight', type=float, default=0.1, help="Weight for temporal loss")
+    parser.add_argument('--syncnet_weight', type=float, default=1.0, help="Weight for syncnet loss")
 
     return parser.parse_args()
 
@@ -167,7 +168,7 @@ def train(net, epoch, batch_size, lr):
                 
                 total_loss = loss_pixel + loss_PerceptualLoss * 0.01
                 if use_syncnet:
-                    total_loss += 10 * sync_loss
+                    total_loss += args.syncnet_weight * sync_loss
 
                 # --- Temporal Loss ---
                 if args.temporal and len(batch) == 6:
