@@ -28,6 +28,8 @@ def get_args():
     parser.add_argument('--batchsize', type=int, default=16)
     parser.add_argument('--lr', type=float, default=0.001)
     parser.add_argument('--asr', type=str, default="hubert")
+    parser.add_argument('--temporal', action='store_true', help="Enable temporal consistency loss")
+    parser.add_argument('--temporal_weight', type=float, default=0.05, help="Weight for temporal loss")
 
     return parser.parse_args()
 
@@ -89,15 +91,36 @@ def train(net, epoch, batch_size, lr):
     save_dir = args.save_dir
     if not os.path.exists(save_dir):
         os.makedirs(save_dir)
-    dataloader_list = []
-    dataset_list = []
-    dataset_dir_list = [args.dataset_dir]
-    for dataset_dir in dataset_dir_list:
-        dataset = MyDataset(dataset_dir, args.asr)
-        train_dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True, drop_last=True, num_workers=4,
-                                      pin_memory=True, persistent_workers=True)
-        dataloader_list.append(train_dataloader)
-        dataset_list.append(dataset)
+
+    all_datasets = []
+    dataset_root = args.dataset_dir.strip()
+    
+    if os.path.isdir(dataset_root):
+        # 检查当前目录下是否有核心数据文件夹
+        if os.path.exists(os.path.join(dataset_root, "full_body_img")):
+            candidate_dirs = [dataset_root]
+        else:
+            # 遍历所有一级子目录
+            candidate_dirs = [os.path.join(dataset_root, d) for d in os.listdir(dataset_root) 
+                            if os.path.isdir(os.path.join(dataset_root, d))]
+            print(f"Scanning for sub-datasets in: {dataset_root}")
+    else:
+        raise ValueError(f"Dataset path {dataset_root} is not a valid directory.")
+
+    for d_dir in candidate_dirs:
+        # 验证该子目录是否是有效的预处理输出 (包含图像文件夹)
+        if os.path.exists(os.path.join(d_dir, "full_body_img")):
+            print(f"  [FOUND] Loading sub-dataset: {d_dir}")
+            all_datasets.append(MyDataset(d_dir, args.asr))
+    
+    if len(all_datasets) == 0:
+        raise ValueError(f"No valid datasets found in {dataset_root}. Make sure subfolders contain 'full_body_img'.")
+
+    from torch.utils.data import ConcatDataset
+    combined_dataset = ConcatDataset(all_datasets)
+    train_dataloader = DataLoader(combined_dataset, batch_size=batch_size, shuffle=True, 
+                                  drop_last=True, num_workers=4, pin_memory=True, 
+                                  persistent_workers=True)
 
     optimizer = optim.Adam(net.parameters(), lr=lr)
     criterion = nn.L1Loss()
@@ -116,30 +139,58 @@ def train(net, epoch, batch_size, lr):
 
     for e in range(start_epoch, epoch):
         net.train()
-        random_i = random.randint(0, len(dataset_dir_list) - 1)
-        dataset = dataset_list[random_i]
-        train_dataloader = dataloader_list[random_i]
-
-        with tqdm(total=len(dataset), desc=f'Epoch {e + 1}/{epoch}', unit='img') as p:
+        with tqdm(total=len(combined_dataset), desc=f'Epoch {e + 1}/{epoch}', unit='img') as p:
             for batch in train_dataloader:
-                imgs, labels, audio_feat = batch
+                # 兼容旧版本 Dataset (3 returns) 和新版本 Temporal Dataset (6 returns)
+                if len(batch) == 6:
+                    imgs, labels, audio_feat, imgs_next, labels_next, audio_feat_next = batch
+                else:
+                    imgs, labels, audio_feat = batch
+                    # 如果 Dataset 没有返回 next frame，就无法计算 Temporal
+                    if args.temporal:
+                        raise ValueError("Temporal loss requires updated dataset returning 6 elements.")
+                
                 imgs = imgs.cuda()
                 labels = labels.cuda()
                 audio_feat = audio_feat.cuda()
+                
+                # --- Forward T ---
                 preds = net(imgs, audio_feat)
+                
+                # --- Loss Calculation T ---
                 if use_syncnet:
                     y = torch.ones([preds.shape[0], 1]).float().cuda()
                     a, v = syncnet(preds, audio_feat)
                     sync_loss = cosine_loss(a, v, y)
                 loss_PerceptualLoss = content_loss.get_loss(preds, labels)
-                loss_pixel = criterion(preds, labels)
+                loss_pixel = criterion(preds, labels) # L1 Loss
+                
+                total_loss = loss_pixel + loss_PerceptualLoss * 0.01
                 if use_syncnet:
-                    loss = loss_pixel + loss_PerceptualLoss * 0.01 + 10 * sync_loss
+                    total_loss += 10 * sync_loss
+
+                # --- Temporal Loss ---
+                if args.temporal and len(batch) == 6:
+                    imgs_next = imgs_next.cuda()
+                    labels_next = labels_next.cuda()
+                    audio_feat_next = audio_feat_next.cuda()
+                    
+                    # Forward T+1
+                    preds_next = net(imgs_next, audio_feat_next)
+                    
+                    # Calculate velocity: (Pred_t+1 - Pred_t) vs (Real_t+1 - Real_t)
+                    # 我们希望生成视频的“速度”和真实视频的“速度”一致
+                    diff_pred = preds_next - preds
+                    diff_real = labels_next - labels
+                    loss_temporal = criterion(diff_pred, diff_real) # L1 Loss on velocity
+                    
+                    total_loss += args.temporal_weight * loss_temporal
+                    p.set_postfix(**{'loss': total_loss.item(), 'temp_loss': loss_temporal.item()})
                 else:
-                    loss = loss_pixel + loss_PerceptualLoss * 0.01
-                p.set_postfix(**{'loss (batch)': loss.item()})
+                    p.set_postfix(**{'loss': total_loss.item()})
+
                 optimizer.zero_grad(set_to_none=True)
-                loss.backward()
+                total_loss.backward()
                 optimizer.step()
                 p.update(imgs.shape[0])
 
@@ -147,7 +198,18 @@ def train(net, epoch, batch_size, lr):
             torch.save(net.state_dict(), os.path.join(save_dir, str(e) + '.pth'))
         if args.see_res:
             net.eval()
-            img_concat_T, img_real_T, audio_feat = dataset.__getitem__(random.randint(0, dataset.__len__()))
+        if args.see_res:
+            net.eval()
+            # 随机从某个子数据集中取样预览
+            random_ds = random.choice(all_datasets)
+            batch_sample = random_ds.__getitem__(random.randint(0, len(random_ds) - 1))
+            
+            # 兼容不同长度的返回
+            if len(batch_sample) == 6:
+                img_concat_T, img_real_T, audio_feat = batch_sample[0], batch_sample[1], batch_sample[2]
+            else:
+                img_concat_T, img_real_T, audio_feat = batch_sample
+                
             img_concat_T = img_concat_T[None].cuda()
             audio_feat = audio_feat[None].cuda()
             with torch.no_grad():

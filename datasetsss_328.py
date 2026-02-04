@@ -127,23 +127,43 @@ class MyDataset(Dataset):
         return img_concat_T, img_real_T
 
     def __getitem__(self, idx):
+        # 确保 idx+1 不越界，如果是最后一帧，下一帧就取自己（静止）
+        idx_next = idx + 1 if idx < self.__len__() - 1 else idx
+
+        # --- Current Frame ---
         img = cv2.imread(self.img_path_list[idx])
         lms_path = self.lms_path_list[idx]
+        
+        # --- Next Frame ---
+        img_next = cv2.imread(self.img_path_list[idx_next])
+        lms_path_next = self.lms_path_list[idx_next]
         
         ex_int = random.randint(0, self.__len__()-1)
         img_ex = cv2.imread(self.img_path_list[ex_int])
         lms_path_ex = self.lms_path_list[ex_int]
         
+        # Process Current Frame
         img_concat_T, img_real_T = self.process_img(img, lms_path, img_ex, lms_path_ex)
         audio_feat = self.get_audio_features(self.audio_feats, idx) 
         
+        # Process Next Frame (使用同一张参考图片 img_ex，保证身份一致)
+        img_concat_T_next, img_real_T_next = self.process_img(img_next, lms_path_next, img_ex, lms_path_ex)
+        audio_feat_next = self.get_audio_features(self.audio_feats, idx_next)
+
+        # Reshape Audio Features
         if self.mode == "wenet":
             audio_feat = audio_feat.reshape(256,16,32)
+            audio_feat_next = audio_feat_next.reshape(256,16,32)
         if self.mode == "hubert":
             audio_feat = audio_feat.reshape(32,32,32)
+            audio_feat_next = audio_feat_next.reshape(32,32,32)
         if self.mode == "ave":
             audio_feat = audio_feat.reshape(32,16,16)
+            audio_feat_next = audio_feat_next.reshape(32,16,16)
         
-        return img_concat_T, img_real_T, audio_feat
+        # 返回:
+        # 0: [Input_t], 1: [Real_t], 2: [Audio_t]
+        # 3: [Input_t+1], 4: [Real_t+1], 5: [Audio_t+1]
+        return img_concat_T, img_real_T, audio_feat, img_concat_T_next, img_real_T_next, audio_feat_next
     
         

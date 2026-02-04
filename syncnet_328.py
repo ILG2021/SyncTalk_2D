@@ -232,9 +232,32 @@ def train(save_dir, dataset_dir, mode):
     if not os.path.exists(save_dir):
         os.makedirs(save_dir, exist_ok=True)
         
-    train_dataset = Dataset(dataset_dir, mode=mode)
+    all_datasets = []
+    dataset_root = dataset_dir.strip()
+    
+    if os.path.isdir(dataset_root):
+        if os.path.exists(os.path.join(dataset_root, "full_body_img")):
+            candidate_dirs = [dataset_root]
+        else:
+            candidate_dirs = [os.path.join(dataset_root, d) for d in os.listdir(dataset_root) 
+                            if os.path.isdir(os.path.join(dataset_root, d))]
+            print(f"Scanning for sub-datasets in: {dataset_root}")
+    else:
+        raise ValueError(f"Dataset path {dataset_root} is not a valid directory.")
+
+    for d_dir in candidate_dirs:
+        if os.path.exists(os.path.join(d_dir, "full_body_img")):
+            print(f"  [FOUND] Loading sub-dataset: {d_dir}")
+            all_datasets.append(Dataset(d_dir, mode=mode))
+    
+    if len(all_datasets) == 0:
+        raise ValueError(f"No valid datasets found in {dataset_root}.")
+
+    from torch.utils.data import ConcatDataset
+    combined_dataset = ConcatDataset(all_datasets)
+
     train_data_loader = DataLoader(
-        train_dataset, batch_size=128, shuffle=True,
+        combined_dataset, batch_size=128, shuffle=True,
         num_workers=16, pin_memory=True, persistent_workers=True)
     model = SyncNet_color(mode).cuda()
     optimizer = optim.Adam([p for p in model.parameters() if p.requires_grad],
