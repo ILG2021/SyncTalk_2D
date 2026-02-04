@@ -5,7 +5,7 @@
 file_name=$1
 cuda_id=0
 asr="whisper"
-temporal="--temporal --temporal_weight 1.0"
+temporal="--temporal --temporal_weight 0.05"
 person_dir="./dataset/$file_name"
 data_dir="./dataset/$file_name/preprocess"
 

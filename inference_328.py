@@ -27,7 +27,7 @@ def main():
     args = parser.parse_args()
 
     checkpoint_path = os.path.join("./checkpoint", args.name)
-    person_data_root = os.path.join("./dataset", args.name)
+    person_data_root = os.path.join("./dataset", args.name) # This line is kept as it defines person_data_root
     
     # 自动定位预处理后的模版文件夹
     preprocess_dir = os.path.join(person_data_root, "preprocess")
@@ -50,14 +50,22 @@ def main():
         # 向下兼容旧的单文件夹结构
         dataset_dir = person_data_root
         print(f"[INFO] Falling back to legacy data path: {dataset_dir}")
-    checkpoint = os.path.join(checkpoint_path, sorted(os.listdir(checkpoint_path), key=lambda x: int(x.split(".")[0]))[-1])
-    print(checkpoint)
+    # 获取checkpoint_path目录下数字最大的.pth文件，按照int排序
+    if not os.path.exists(checkpoint_path):
+        raise FileNotFoundError(f"Checkpoint directory not found: {checkpoint_path}")
+    
+    available_ckpts = [f for f in os.listdir(checkpoint_path) if f.endswith('.pth')]
+    if not available_ckpts:
+        raise FileNotFoundError(f"No .pth files found in {checkpoint_path}")
+
+    checkpoint = os.path.join(checkpoint_path, sorted(available_ckpts, key=lambda x: int(os.path.splitext(x)[0]))[-1])
+    print(f"[INFO] Loading checkpoint: {checkpoint}")
     
     audio_name = os.path.splitext(os.path.basename(args.audio_path))[0]
     ckpt_name = os.path.splitext(os.path.basename(checkpoint))[0]
     save_path = os.path.join("./result", f"{args.name}_{audio_name}_{ckpt_name}.mp4")
+    os.makedirs("./result", exist_ok=True)
     
-    dataset_dir = os.path.join("./dataset", args.name)
     audio_path = args.audio_path
     mode = args.asr
 
@@ -144,6 +152,26 @@ def main():
     if args.parsing:
         parsing_dir = os.path.join(dataset_dir, "parsing")
 
+    # --- 锁定参考帧逻辑 ---
+    print(f"[INFO] Loading reference frame from {img_dir}/0.jpg")
+    ref_img_full = cv2.imread(os.path.join(img_dir, "0.jpg"))
+    ref_lms_path = os.path.join(lms_dir, '0.lms')
+    ref_lms_list = []
+    with open(ref_lms_path, "r") as f:
+        for line in f.read().splitlines():
+            ref_lms_list.append(np.array(line.split(" "), dtype=np.float32))
+    ref_lms = np.array(ref_lms_list, dtype=np.int32)
+    
+    # 使用与 dataset 相同的裁剪逻辑
+    r_xmin, r_ymin = ref_lms[1][0], ref_lms[52][1]
+    r_xmax = ref_lms[31][0]
+    r_width = r_xmax - r_xmin
+    r_ymax = r_ymin + r_width
+    ref_crop = cv2.resize(ref_img_full[r_ymin:r_ymax, r_xmin:r_xmax], (328, 328), interpolation=cv2.INTER_CUBIC)
+    ref_face = ref_crop[4:324, 4:324].transpose(2,0,1).astype(np.float32) / 255.0
+    ref_face_T = torch.from_numpy(ref_face).to(device)
+    # ----------------------
+
     temp_video_path = save_path.replace(".mp4", "temp.mp4")
     if mode=="hubert" or mode=="ave" or mode=="whisper":
         video_writer = cv2.VideoWriter(temp_video_path, cv2.VideoWriter_fourcc(*'mp4v'), 25, (w, h))
@@ -203,9 +231,10 @@ def main():
         img_masked = img_masked.transpose(2,0,1).astype(np.float32)
         img_real_ex = img_real_ex.transpose(2,0,1).astype(np.float32)
         
-        img_real_ex_T = torch.from_numpy(img_real_ex / 255.0)
-        img_masked_T = torch.from_numpy(img_masked / 255.0)
-        img_concat_T = torch.cat([img_real_ex_T, img_masked_T], axis=0)[None]
+        img_masked_T = torch.from_numpy(img_masked / 255.0).to(device)
+        
+        # 将全局参考帧 ref_face_T 与当前带掩码的帧拼接
+        img_concat_T = torch.cat([ref_face_T, img_masked_T], axis=0)[None]
         
         audio_feat = get_audio_features(audio_feats, i)
         if mode=="hubert":
