@@ -15,6 +15,10 @@ python data_utils/batch_process.py $data_dir --asr $asr
 echo "[STEP 1.5] Smoothing landmarks to reduce jitter..."
 python data_utils/smooth_landmarks.py $data_dir
 
+# 1.6. 生成极速训练数据 (images.npy)
+echo "[STEP 1.6] Preprocessing images to numpy for fast loading..."
+python data_utils/preprocess_to_npy.py $data_dir
+
 # 2. 训练 SyncNet (它现在会自动扫描 data_dir 下的所有子文件夹)
 echo "[STEP 2] Training SyncNet on all sub-datasets..."
 CUDA_VISIBLE_DEVICES=$cuda_id python syncnet_328.py --save_dir ./syncnet_ckpt/$person_name --dataset_dir $data_dir --asr $asr

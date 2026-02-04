@@ -13,31 +13,29 @@ import argparse
 
 class Dataset(object):
     def __init__(self, dataset_dir, mode):
+        self.mode = mode
         
-        self.img_path_list = []
-        self.lms_path_list = []
+        # 1. 加载 images.npy (mmap)
+        self.npy_path = os.path.join(dataset_dir, "images.npy")
+        if os.path.exists(self.npy_path):
+            print(f"[INFO] SyncNet Loading cached images from {self.npy_path} (mmap)...")
+            self.images = np.load(self.npy_path, mmap_mode='r')
+        else:
+            raise ValueError(f"images.npy NOT found in {dataset_dir}. Please run 'python data_utils/preprocess_to_npy.py {dataset_dir}' first.")
         
-        full_body_img_dir = os.path.join(dataset_dir, "full_body_img")
-        landmarks_dir = os.path.join(dataset_dir, "landmarks")
-        
-        for i in range(len(os.listdir(full_body_img_dir))):
-            img_path = os.path.join(full_body_img_dir, str(i) + ".jpg")
-            lms_path = os.path.join(landmarks_dir, str(i) + ".lms")
-            self.img_path_list.append(img_path)
-            self.lms_path_list.append(lms_path)
-                
+        # 2. 加载音频特征
         if mode=="wenet":
             audio_feats_path = os.path.join(dataset_dir, "aud_wenet.npy")
         if mode=="hubert":
             audio_feats_path = os.path.join(dataset_dir, "aud_hu.npy")
         if mode=="ave":
             audio_feats_path = os.path.join(dataset_dir, "aud_ave.npy")
-        self.mode = mode
-        self.audio_feats = np.load(audio_feats_path)
-        self.audio_feats = self.audio_feats.astype(np.float32)
+            
+        self.audio_feats = np.load(audio_feats_path).astype(np.float32)
+        print(f"[INFO] Loaded SyncNet dataset: {len(self.images)} frames.")
         
     def __len__(self):
-        return min(len(self.img_path_list), self.audio_feats.shape[0])
+        return min(len(self.images), self.audio_feats.shape[0])
 
     def get_audio_features(self, features, index):
         
@@ -58,43 +56,23 @@ class Dataset(object):
             auds = torch.cat([auds, torch.zeros_like(auds[:pad_right])], dim=0) # [8, 16]
         return auds
     
-    def process_img(self, img, lms_path, img_ex, lms_path_ex):
-
-        lms_list = []
-        with open(lms_path, "r") as f:
-            lines = f.read().splitlines()
-            for line in lines:
-                arr = line.split(" ")
-                arr = np.array(arr, dtype=np.float32)
-                lms_list.append(arr)
-        lms = np.array(lms_list, dtype=np.int32)
-        xmin = lms[1][0]
-        ymin = lms[52][1]
+    def process_img_from_npy(self, img):
+        # 原逻辑：
+        # crop_img (328x328)
+        # img_real = crop_img[4:324, 4:324]
         
-        xmax = lms[31][0]
-        width = xmax - xmin
-        ymax = ymin + width
-        # ymax = lms[16][1] + width//15        
-        # ymax = ymin + width//7*6
-        crop_img = img[ymin:ymax, xmin:xmax]
-        crop_img = cv2.resize(crop_img, (328, 328), cv2.INTER_AREA)
-        img_real = crop_img[4:324, 4:324].copy()
-        img_real_ori = img_real.copy()
-        img_real_ori = img_real_ori.transpose(2,0,1).astype(np.float32)
-        img_real_T = torch.from_numpy(img_real_ori / 255.0)
+        img_real = img[4:324, 4:324].copy() # 320x320
+        # Transpose & Normalize
+        img_real_T = torch.from_numpy(img_real.transpose(2,0,1).astype(np.float32) / 255.0)
         
         return img_real_T
 
     def __getitem__(self, idx):
-        img = cv2.imread(self.img_path_list[idx])
-        lms_path = self.lms_path_list[idx]
+        # 极速加载
+        img = self.images[idx]
         
-        ex_int = random.randint(0, self.__len__()-1)
-        img_ex = cv2.imread(self.img_path_list[ex_int])
-        lms_path_ex = self.lms_path_list[ex_int]
-        
-        img_real_T = self.process_img(img, lms_path, img_ex, lms_path_ex)
-        audio_feat = self.get_audio_features(self.audio_feats, idx) # 
+        img_real_T = self.process_img_from_npy(img)
+        audio_feat = self.get_audio_features(self.audio_feats, idx) 
         # audio_feat = self.audio_feats[idx]
         # print(audio_feat.shape)
         # asd
