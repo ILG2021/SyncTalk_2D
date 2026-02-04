@@ -3,7 +3,6 @@
 person_name=$1
 cuda_id=$2
 asr="hubert"
-temporal="--temporal --temporal_weight 0.05"
 data_dir="./dataset/$person_name"
 
 # 1. 批量预处理该目录下所有的视频文件
@@ -28,4 +27,4 @@ syncnet_checkpoint_dir=$(ls -v ./syncnet_ckpt/$person_name/*.pth | tail -n 1)
 
 # 3. 训练主模型 (它现在也会自动扫描 data_dir 下的所有子文件夹)
 echo "[STEP 3] Training main model on all sub-datasets..."
-CUDA_VISIBLE_DEVICES=$cuda_id python train_328.py --dataset_dir $data_dir --save_dir ./checkpoint/$person_name --asr $asr --use_syncnet --syncnet_checkpoint $syncnet_checkpoint_dir $temporal
+CUDA_VISIBLE_DEVICES=$cuda_id python train_328.py --dataset_dir $data_dir --save_dir ./checkpoint/$person_name --asr $asr --use_syncnet --syncnet_checkpoint $syncnet_checkpoint_dir --temporal
