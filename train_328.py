@@ -171,7 +171,7 @@ def train(net, epoch, batch_size, lr):
                     total_loss += args.syncnet_weight * sync_loss
 
                 # --- Temporal Loss ---
-                if args.temporal and len(batch) == 6:
+                if args.use_temporal and len(batch) == 6:
                     imgs_next = imgs_next.cuda()
                     labels_next = labels_next.cuda()
                     audio_feat_next = audio_feat_next.cuda()
