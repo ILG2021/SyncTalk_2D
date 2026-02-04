@@ -19,7 +19,8 @@ def main():
                                          formatter_class=argparse.ArgumentDefaultsHelpFormatter)
 
     parser.add_argument('--asr', type=str, default="hubert")
-    parser.add_argument('--name', type=str, default="May")
+    parser.add_argument('--name', type=str, default="May", help="Person name (model checkpoint folder)")
+    parser.add_argument('--bg_name', type=str, default="", help="Specific background material name (sub-folder in dataset)")
     parser.add_argument('--audio_path', type=str, default="demo/talk_hb.wav")
     parser.add_argument('--start_frame', type=int, default=0)
     parser.add_argument('--parsing', type=bool, default=False)
@@ -32,9 +33,23 @@ def main():
     
     audio_name = os.path.splitext(os.path.basename(args.audio_path))[0]
     ckpt_name = os.path.splitext(os.path.basename(checkpoint))[0]
-    save_path = os.path.join("./result", f"{args.name}_{audio_name}_{ckpt_name}.mp4")
     
+    # 构建数据集路径，支持多视频结构
     dataset_dir = os.path.join("./dataset", args.name)
+    bg_suffix = ""
+    
+    if args.bg_name:
+        dataset_dir = os.path.join(dataset_dir, args.bg_name)
+        bg_suffix = f"_{args.bg_name}"
+    elif not os.path.exists(os.path.join(dataset_dir, "full_body_img")):
+        # 如果未指定 bg_name 且根目录没有数据，尝试自动使用第一个子目录
+        subdirs = [d for d in os.listdir(dataset_dir) if os.path.isdir(os.path.join(dataset_dir, d))]
+        if subdirs:
+            print(f"[WARN] No --bg_name provided and root dataset is empty. Auto-selecting first material: {subdirs[0]}")
+            dataset_dir = os.path.join(dataset_dir, subdirs[0])
+            bg_suffix = f"_{subdirs[0]}"
+    
+    save_path = os.path.join("./result", f"{args.name}{bg_suffix}_{audio_name}_{ckpt_name}.mp4")
     audio_path = args.audio_path
     mode = args.asr
 
