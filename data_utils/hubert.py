@@ -27,7 +27,7 @@ def extract_hubert(wav_path, device='cuda'):
         outputs = model(input_values, output_hidden_states=True)
         # 使用第 12 层特征 (indices 0-24, 12 是中间层)
         # 或者使用最后一层，这里我们使用 hidden_states[12]
-        feats = outputs.hidden_states[12].squeeze(0) # [T_hubert, 1024]
+        feats = outputs.hidden_states[20].squeeze(0) # [T_hubert, 1024]
 
     feats = feats.cpu().numpy()
     

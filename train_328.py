@@ -28,7 +28,7 @@ def get_args():
     parser.add_argument('--batchsize', type=int, default=16)
     parser.add_argument('--lr', type=float, default=0.001)
     parser.add_argument('--asr', type=str, default="hubert")
-    parser.add_argument('--temporal', action='store_true', help="Enable temporal consistency loss")
+    parser.add_argument('--use_temporal', action='store_true', help="Enable temporal consistency loss")
     parser.add_argument('--temporal_weight', type=float, default=0.1, help="Weight for temporal loss")
     parser.add_argument('--syncnet_weight', type=float, default=1.0, help="Weight for syncnet loss")
 
