@@ -21,6 +21,7 @@ def main():
     parser.add_argument('--asr', type=str, default="hubert")
     parser.add_argument('--name', type=str, default="May", help="Person name (model checkpoint folder)")
     parser.add_argument('--bg_name', type=str, default="", help="Specific background material name (sub-folder in dataset)")
+    parser.add_argument('--video_path', type=str, default="", help="Custom video path (overrides bg_name choice if provided)")
     parser.add_argument('--audio_path', type=str, default="demo/talk_hb.wav")
     parser.add_argument('--start_frame', type=int, default=0)
     parser.add_argument('--parsing', type=bool, default=False)
@@ -38,7 +39,40 @@ def main():
     dataset_dir = os.path.join("./dataset", args.name)
     bg_suffix = ""
     
-    if args.bg_name:
+    
+    if args.video_path:
+        import shutil
+        import sys
+        if os.path.abspath('data_utils') not in sys.path:
+            sys.path.append(os.path.abspath('data_utils'))
+        try:
+            from process import extract_images, get_landmark
+        except ImportError:
+            try:
+                from data_utils.process import extract_images, get_landmark
+            except ImportError:
+                print("Could not import process tools")
+
+        video_name = os.path.splitext(os.path.basename(args.video_path))[0]
+        # Custom video creates a new dataset folder under the person's directory
+        dataset_dir = os.path.join(dataset_dir, video_name)
+        bg_suffix = f"_{video_name}"
+        
+        os.makedirs(dataset_dir, exist_ok=True)
+        
+        target_video_path = os.path.join(dataset_dir, os.path.basename(args.video_path))
+        # Copy if not exists or different path
+        if not os.path.exists(target_video_path) or os.path.abspath(args.video_path) != os.path.abspath(target_video_path):
+            shutil.copy2(args.video_path, target_video_path)
+            
+        if not os.path.exists(os.path.join(dataset_dir, "full_body_img")):
+            print(f"[INFO] Preprocessing custom video: {target_video_path}")
+            extract_images(target_video_path)
+            lms_dir = os.path.join(dataset_dir, "landmarks")
+            os.makedirs(lms_dir, exist_ok=True)
+            get_landmark(target_video_path, lms_dir)
+
+    elif args.bg_name:
         dataset_dir = os.path.join(dataset_dir, args.bg_name)
         bg_suffix = f"_{args.bg_name}"
     elif not os.path.exists(os.path.join(dataset_dir, "full_body_img")):

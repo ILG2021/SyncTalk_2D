@@ -29,7 +29,7 @@ def extract_images(path):
         print(f'[INFO] Converting {ext} video to 25fps mp4 for compatibility...')
         out_25 = f"{name}_25fps.mp4"
         # 使用 libx264 确保兼容性
-        cmd = f'ffmpeg -i "{path}" -vf "fps=25" -c:v libx264 -c:a aac "{out_25}" -y'
+        cmd = f'ffmpeg -i "{path}" -vf "fps=25" -c:v libx264 -crf 18 -c:a aac "{out_25}" -y'
         os.system(cmd)
         path = out_25
         # 重新打开转码后的视频
@@ -104,7 +104,7 @@ if __name__ == "__main__":
     
     parser = argparse.ArgumentParser()
     parser.add_argument('path', type=str, help="path to video file")
-    parser.add_argument('--asr', type=str, default='ave', choices=['ave', 'hubert'], help="ASR mode for audio features")
+    parser.add_argument('--asr', type=str, default='hubert', choices=['ave', 'hubert'], help="ASR mode for audio features")
     opt = parser.parse_args()
 
     base_dir = os.path.dirname(opt.path)
