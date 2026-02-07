@@ -123,7 +123,7 @@ def main():
         with torch.no_grad():
             outputs = hubert_model(input_values, output_hidden_states=True)
             # 统一使用第 12 层特征
-            feats = outputs.hidden_states[12].squeeze(0).cpu().numpy()
+            feats = outputs.hidden_states[20].squeeze(0).cpu().numpy()
         
         # Hubert is 50Hz, Video is 25Hz -> Reshape to concatenation of pairs
         T_hu = feats.shape[0]

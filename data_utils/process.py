@@ -1,8 +1,12 @@
-import os
-import cv2
 import argparse
-import numpy as np
+import os
+import sys
+
+sys.path.append("data_utils")
+import cv2
 from tqdm import tqdm
+
+
 def extract_audio(path, out_path, sample_rate=16000):
     
     print(f'[INFO] ===== extract audio from "{path}" to "{out_path}" =====')
