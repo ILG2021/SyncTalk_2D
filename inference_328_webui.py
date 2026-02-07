@@ -44,7 +44,7 @@ def get_random_start_frame(aud_path, fps=25):
     if not aud_path or not os.path.exists(aud_path):
         return 0
     try:
-        y, sr = librosa.load(aud_path, sr=None)
+        y, sr = librosa.load(aud_path, sr=16000)
         # top_db=30 is a common threshold for "silence"
         intervals = librosa.effects.split(y, top_db=30)
 
