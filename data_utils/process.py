@@ -95,7 +95,13 @@ def get_landmark(path, landmarks_dir):
             continue
         img_path = os.path.join(full_img_dir, img_name)
         lms_path = os.path.join(landmarks_dir, img_name.replace(".jpg", ".lms"))
-        pre_landmark, x1, y1 = landmark.detect(img_path)
+        try:
+            pre_landmark, x1, y1 = landmark.detect(img_path)
+        except Exception as e:
+            print(f"🚨🚨🚨🚨{img_path}提取landmark失败！！！")
+            os.remove(img_path)
+            continue
+
         with open(lms_path, "w") as f:
             for p in pre_landmark:
                 x, y = p[0]+x1, p[1]+y1
@@ -103,9 +109,6 @@ def get_landmark(path, landmarks_dir):
                 f.write(" ")
                 f.write(str(y))
                 f.write("\n")
-        if not os.path.exists(lms_path):
-            os.remove(img_path)
-            print(f"\n[=========================Warning========================] {img_path}创建检测landmark失败，已删除\n")
 
 if __name__ == "__main__":
     

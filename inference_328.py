@@ -8,8 +8,7 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 from unet_328 import Model
-from utils import AudioEncoder, AudDataset, get_audio_features
-
+from utils import AudioEncoder, AudDataset, get_audio_features, smooth_audio_features
 
 
 def main():

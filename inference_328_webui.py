@@ -15,7 +15,7 @@ sys.path.append(os.path.join(os.getcwd(), 'data_utils'))
 import random
 import librosa
 from unet_328 import Model
-from utils import AudioEncoder, AudDataset, get_audio_features
+from utils import AudioEncoder, AudDataset, get_audio_features, smooth_audio_features
 
 # Attempt to import preprocessing functions
 try:
