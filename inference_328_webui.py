@@ -15,12 +15,6 @@ sys.path.append(os.path.join(os.getcwd(), 'data_utils'))
 from unet_328 import Model
 from utils import AudioEncoder, AudDataset, get_audio_features
 
-# Attempt to import preprocessing functions
-try:
-    from data_utils.process import extract_images, get_landmark
-except ImportError:
-    print("[WARN] Could not import data_utils.process directly. Preprocessing might fail if dependencies are missing.")
-    pass
 
 
 def scan_checkpoints():
@@ -38,38 +32,9 @@ def scan_datasets(person_name):
     return subdirs
 
 
-def preprocess_video(video_path, target_dir):
-    """
-    Refactored from data_utils/process.py to run on a specific target directory
-    """
-    print(f"[INFO] Preprocessing video: {video_path} -> {target_dir}")
-
-    # Ensure target directory exists
-    if not os.path.exists(target_dir):
-        os.makedirs(target_dir)
-
-    # Copy video to target_dir (renaming to something standard or keeping original)
-    video_name = os.path.basename(video_path)
-    dist_video_path = os.path.join(target_dir, video_name)
-
-    # If file implies a move/copy is needed
-    if os.path.abspath(video_path) != os.path.abspath(dist_video_path):
-        shutil.copy2(video_path, dist_video_path)
-
-    # Use the extract_images logic from process.py
-    # Note: extract_images in process.py assumes full_body_img is created relative to the video path's directory
-    # So calling it on dist_video_path (which is inside target_dir) will create target_dir/full_body_img
-    extract_images(dist_video_path)
-
-    # Landmarks
-    landmarks_dir = os.path.join(target_dir, "landmarks")
-    os.makedirs(landmarks_dir, exist_ok=True)
-    get_landmark(dist_video_path, landmarks_dir)
-
-    print("[INFO] Preprocessing complete.")
 
 
-def inference_logic(checkpoint_name, dataset_name, custom_video, audio_path, asr_mode, progress=gr.Progress()):
+def inference_logic(checkpoint_name, dataset_name, audio_path, asr_mode, start_frame, progress=gr.Progress()):
     if not checkpoint_name:
         raise gr.Error("Please select a checkpoint.")
 
@@ -79,49 +44,24 @@ def inference_logic(checkpoint_name, dataset_name, custom_video, audio_path, asr
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
     # --- 1. Determine Dataset Directory ---
-    if custom_video is not None:
-        # User provided a custom video. 
-        # We need to determine if we have already processed this file.
-        # We use the filename to create a subdirectory in dataset/{checkpoint_name}/
-
-        # custom_video is the path to the uploaded file
-        f_name_full = os.path.basename(custom_video)
-        f_name_stem = os.path.splitext(f_name_full)[0]
-
-        # Define where this custom dataset should live
-        # Using checkpoint_name as parent to keep organized by person
-        target_dataset_dir = os.path.join("dataset", checkpoint_name, f_name_stem)
-
-        # Check if it exists and looks valid (has full_body_img)
-        if os.path.exists(os.path.join(target_dataset_dir, "full_body_img")):
-            print(f"[INFO] Dataset for custom video '{f_name_full}' already exists at {target_dataset_dir}. Using it.")
+    dataset_dir = None
+    if not dataset_name:
+        # Try auto-select
+        candidates = scan_datasets(checkpoint_name)
+        if candidates:
+            dataset_name = candidates[0]
+            print(f"[INFO] Auto-selected dataset: {dataset_name}")
         else:
-            progress(0, desc="Preprocessing Custom Video...")
-            # Invoke preprocessing logic
-            preprocess_video(custom_video, target_dataset_dir)
-
-        dataset_dir = target_dataset_dir
-
-    else:
-        dataset_dir = None
-        # Use selected template
-        if not dataset_name:
-            # Try auto-select
-            candidates = scan_datasets(checkpoint_name)
-            if candidates:
-                dataset_name = candidates[0]
-                print(f"[INFO] Auto-selected dataset: {dataset_name}")
+            # Check legacy root structure
+            legacy_check = os.path.join("dataset", checkpoint_name, "full_body_img")
+            if os.path.exists(legacy_check):
+                dataset_dir = os.path.join("dataset", checkpoint_name)
+                print(f"[INFO] Using legacy root dataset structure at {dataset_dir}")
             else:
-                # If truly no datasets, check if root has images (legacy structure)
-                legacy_check = os.path.join("dataset", checkpoint_name, "full_body_img")
-                if os.path.exists(legacy_check):
-                    dataset_dir = os.path.join("dataset", checkpoint_name)
-                    print(f"[INFO] Using legacy root dataset structure at {dataset_dir}")
-                else:
-                    raise gr.Error("No dataset selected and no custom video provided.")
+                raise gr.Error("No dataset selected and no template found for this checkpoint.")
 
-        if not dataset_dir:  # if not set by legacy check
-            dataset_dir = os.path.join("dataset", checkpoint_name, dataset_name)
+    if not dataset_dir:
+        dataset_dir = os.path.join("dataset", checkpoint_name, dataset_name)
 
     print(f"[INFO] Using Dataset Directory: {dataset_dir}")
 
@@ -170,7 +110,7 @@ def inference_logic(checkpoint_name, dataset_name, custom_video, audio_path, asr
         input_values = processor(speech, return_tensors="pt", sampling_rate=16000).input_values.to(device)
         with torch.no_grad():
             outputs = hubert_model(input_values, output_hidden_states=True)
-            feats = outputs.hidden_states[12].squeeze(0).cpu().numpy()
+            feats = outputs.hidden_states[20].squeeze(0).cpu().numpy()
 
         T_hu = feats.shape[0]
         if T_hu % 2 != 0:
@@ -224,7 +164,6 @@ def inference_logic(checkpoint_name, dataset_name, custom_video, audio_path, asr
     # --- 5. Inference Loop ---
     step_stride = 0
     img_idx = 0
-    start_frame = 0
 
     print(f"[INFO] Starting Inference: {audio_feats.shape[0]} frames...")
 
@@ -331,8 +270,8 @@ def create_demo():
             dataset_dd = gr.Dropdown(choices=[], label="2. Select Reference Video Template (from dataset)")
 
         with gr.Row():
-            custom_video = gr.File(label="OR Upload Custom Reference Video (overrides template)", file_types=["video"])
             audio_input = gr.File(label="3. Upload Driving Audio", file_types=["audio"])
+            start_frame_input = gr.Number(value=0, label="4. Start Frame (Shift from first image)", precision=0)
 
         asr_mode = gr.Dropdown(choices=["hubert", "ave"], value="hubert", label="ASR Mode")
 
@@ -348,7 +287,7 @@ def create_demo():
         checkpoint_dd.change(fn=update_ds_choices, inputs=checkpoint_dd, outputs=dataset_dd)
 
         btn.click(fn=inference_logic,
-                  inputs=[checkpoint_dd, dataset_dd, custom_video, audio_input, asr_mode],
+                  inputs=[checkpoint_dd, dataset_dd, audio_input, asr_mode, start_frame_input],
                   outputs=output_video)
 
     return demo
