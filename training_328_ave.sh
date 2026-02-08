@@ -15,7 +15,13 @@ python data_utils/smooth_landmarks.py $data_dir
 echo "[STEP 1.6] Preprocessing images to numpy for fast loading..."
 python data_utils/preprocess_to_npy.py $data_dir
 
+# 2. 训练 SyncNet (它现在会自动扫描 data_dir 下的所有子文件夹)
+echo "[STEP 2] Training SyncNet on all sub-datasets..."
+python syncnet_328.py --save_dir ./syncnet_ckpt/$person_name --dataset_dir $data_dir --asr $asr
+
+# 获取最新的 SyncNet 权重
+syncnet_checkpoint_dir=$(ls -v ./syncnet_ckpt/$person_name/*.pth | tail -n 1)
 # hubert不需要syncnet，ave需要
 # 3. 训练主模型 (它现在也会自动扫描 data_dir 下的所有子文件夹)
 echo "[STEP 3] Training main model on all sub-datasets..."
-python train_328.py --dataset_dir $data_dir --save_dir ./checkpoint/$person_name --asr $asr --use_temporal --temporal_weight 0.5
+python train_328.py --dataset_dir $data_dir --save_dir ./checkpoint/$person_name --asr $asr --use_syncnet --syncnet_checkpoint $syncnet_checkpoint_dir --use_temporal

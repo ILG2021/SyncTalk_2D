@@ -103,6 +103,9 @@ def get_landmark(path, landmarks_dir):
                 f.write(" ")
                 f.write(str(y))
                 f.write("\n")
+        if not os.path.exists(lms_path):
+            os.remove(img_path)
+            print(f"\n[=========================Warning========================] {img_path}创建检测landmark失败，已删除\n")
 
 if __name__ == "__main__":
     

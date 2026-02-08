@@ -156,3 +156,16 @@ class AudDataset(object):
         mel = torch.FloatTensor(mel.T).unsqueeze(0)
 
         return mel
+
+def smooth_audio_features(audio_feats):
+    # --- Audio Feature Smoothing (to reduce jitter in silent segments) ---
+    print(f"[INFO] Smoothing audio features (window_size=3)...")
+    window_size = 3
+    pad_size = window_size // 2
+    # Pad at edges to maintain sequence length
+    padded_feats = np.pad(audio_feats, ((pad_size, pad_size), (0, 0)), mode='edge')
+    smoothed_feats = np.zeros_like(audio_feats)
+    for t in range(audio_feats.shape[0]):
+        smoothed_feats[t] = np.mean(padded_feats[t:t + window_size], axis=0)
+    audio_feats = smoothed_feats
+    return audio_feats

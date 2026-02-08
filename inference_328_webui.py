@@ -254,11 +254,12 @@ def inference_logic(checkpoint_name, dataset_name, custom_video, audio_files, as
             input_values = processor(speech, return_tensors="pt", sampling_rate=16000).input_values.to(device)
             with torch.no_grad():
                 outputs = hubert_model(input_values, output_hidden_states=True)
-                feats = outputs.hidden_states[20].squeeze(0).cpu().numpy()
+                feats = outputs.hidden_states[12].squeeze(0).cpu().numpy()
 
             if feats.shape[0] % 2 != 0:
                 feats = np.concatenate([feats, feats[-1:]], axis=0)
             audio_feats = feats.reshape(-1, 2048)
+        audio_feats = smooth_audio_features(audio_feats)
 
         # 5.2 Output Paths
         os.makedirs("result", exist_ok=True)
