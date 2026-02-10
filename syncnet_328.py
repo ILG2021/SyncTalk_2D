@@ -206,7 +206,7 @@ def cosine_loss(a, v, y):
 
     return loss
     
-def train(save_dir, dataset_dir, mode):
+def train(save_dir, dataset_dir, mode, epochs):
     if not os.path.exists(save_dir):
         os.makedirs(save_dir, exist_ok=True)
         
@@ -255,7 +255,7 @@ def train(save_dir, dataset_dir, mode):
             model.load_state_dict(torch.load(checkpoint_path))
 
     best_loss = 1000000
-    for epoch in range(start_epoch, 100):
+    for epoch in range(start_epoch, epochs):
         for batch in train_data_loader:
             imgT, audioT, y = batch
             imgT = imgT.cuda()
@@ -279,6 +279,7 @@ if __name__ == "__main__":
     parser.add_argument('--save_dir', default='test', type=str)
     parser.add_argument('--dataset_dir', default='./dataset/May', type=str)
     parser.add_argument('--asr', default='ave', type=str)
+    parser.add_argument('--epochs', default=100, type=int)
     opt = parser.parse_args()
     
-    train(opt.save_dir, opt.dataset_dir, opt.asr)
+    train(opt.save_dir, opt.dataset_dir, opt.asr, opt.epochs)
